@@ -220,6 +220,8 @@ github.com/tiny-systems/module v0.1.86 h1:s7kAZV+8P5zJcsb9FYhPwTDYfkyj/ICDDuWtrj
 github.com/tiny-systems/module v0.1.86/go.mod h1:5Pd+/numY+YJK0lH7z5yU4ZnmVibrodzt5mjDyy0z1w=
 github.com/tiny-systems/module v0.1.87 h1:aof9eD6dPXRKT1NWIhATPtgu+njwm/gEXuNKP6NMKZM=
 github.com/tiny-systems/module v0.1.87/go.mod h1:5Pd+/numY+YJK0lH7z5yU4ZnmVibrodzt5mjDyy0z1w=
+github.com/tiny-systems/module v0.1.88 h1:wOXWBwRig48BvDZi4G16ERdqAMZ35lsbIp7p4H3uV/c=
+github.com/tiny-systems/module v0.1.88/go.mod h1:5Pd+/numY+YJK0lH7z5yU4ZnmVibrodzt5mjDyy0z1w=
 github.com/tiny-systems/platform-api v0.0.10 h1:XFP0EgeDhjXtm7etBjBJrcih/z0BLXor3pcOjDuk1R8=
 github.com/tiny-systems/platform-api v0.0.10/go.mod h1:wZ5N4GR33bkFdryDGJuX2Oni9mtgTuXwdM/jHhLsAWU=
 github.com/ugorji/go/codec v1.2.11 h1:BMaWp1Bb6fHwEtbplGBGJ498wD+LKlNSl25MjdZY4dU=
