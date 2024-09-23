@@ -1,4 +1,4 @@
-module github.com/tiny-systems/example-module
+module github.com/tiny-systems/common-module
 
 go 1.23.1
 

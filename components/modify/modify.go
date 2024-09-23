@@ -1,4 +1,4 @@
-package echo
+package modify
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	ComponentName        = "echo"
+	ComponentName        = "common_modify"
 	InPort        string = "in"
 	OutPort       string = "out"
 )
@@ -16,7 +16,7 @@ const (
 type Context any
 
 type InMessage struct {
-	Context Context `json:"context" configurable:"true" required:"true" title:"Context" description:"Arbitrary message to be echoed"`
+	Context Context `json:"context" configurable:"true" required:"true" title:"Context" description:"Arbitrary message to be modified"`
 }
 
 type Component struct {
@@ -29,9 +29,9 @@ func (t *Component) Instance() module.Component {
 func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
-		Description: "Echo",
-		Info:        "Sends the same message as it receives",
-		Tags:        []string{"Echo", "Demo"},
+		Description: "Sync",
+		Info:        "Sends a new message after incoming message received",
+		Tags:        []string{"SDK"},
 	}
 }
 
