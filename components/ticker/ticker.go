@@ -3,6 +3,7 @@ package ticker
 import (
 	"context"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
 	"time"
@@ -18,7 +19,7 @@ type Context any
 type Settings struct {
 	Context Context `json:"context,omitempty" configurable:"true" title:"Context" description:"Arbitrary message to be send each period of time"`
 	Delay   int     `json:"delay" required:"true" title:"Delay (ms)" description:"Delay between signals" minimum:"0" default:"1000"`
-	Auto    bool    `json:"auto" title:"Auto send" required:"true" description:"Start sending as soon as component deployed"`
+	Auto    bool    `json:"auto" title:"Auto send" required:"true" description:"Start sending as soon as component configured"`
 }
 
 type Component struct {
@@ -53,15 +54,25 @@ func (t *Component) GetInfo() module.ComponentInfo {
 // Emit non a pointer receiver copies Component with copy of settings
 func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 
+	var runCtx context.Context
+	runCtx, t.cancel = context.WithCancel(ctx)
+
+	// redraw
+	_ = handler(ctx, module.ReconcilePort, nil)
+
 	for {
 		timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
 		select {
 		case <-timer.C:
+
+			fmt.Println("tick")
+			spew.Dump(t.settings.Context)
+
 			_ = handler(ctx, OutPort, t.settings.Context)
 
-		case <-ctx.Done():
+		case <-runCtx.Done():
 			timer.Stop()
-			return ctx.Err()
+			return runCtx.Err()
 		}
 	}
 }
@@ -78,7 +89,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		t.settings.Context = in.Context
 
 		if in.Stop && t.cancel != nil {
-			// we run and asked to stop
+			// we are running and asked to stop
 			t.cancel()
 			t.cancel = nil
 			// redraw
@@ -87,12 +98,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		}
 		if in.Start && t.cancel == nil {
 			//asked to start and not running
-			var ctx2 context.Context
-
-			ctx2, t.cancel = context.WithCancel(ctx)
-			// redraw
-			_ = handler(ctx, module.ReconcilePort, nil)
-			return t.emit(ctx2, handler)
+			return t.emit(ctx, handler)
 		}
 	case module.SettingsPort:
 		in, ok := msg.(Settings)
@@ -102,6 +108,12 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		t.settings = in
 
 		if t.settings.Auto {
+
+			// stop if its already running
+			if t.cancel != nil {
+				t.cancel()
+				t.cancel = nil
+			}
 			return t.emit(ctx, handler)
 		}
 	}
