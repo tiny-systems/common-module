@@ -16,7 +16,7 @@ type Context any
 
 type Settings struct {
 	Context Context `json:"context" required:"true" configurable:"true" title:"Context" description:"Arbitrary message to send"`
-	Auto    bool    `json:"auto" title:"Auto send" required:"true" description:"Send signal automatically"`
+	Auto    bool    `json:"auto" title:"Auto start" required:"true" description:"Start sending as soon as component deployed"`
 }
 
 type Component struct {
