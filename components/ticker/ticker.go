@@ -3,7 +3,6 @@ package ticker
 import (
 	"context"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
 	"time"
@@ -64,10 +63,6 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 		timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
 		select {
 		case <-timer.C:
-
-			fmt.Println("tick")
-			spew.Dump(t.settings.Context)
-
 			_ = handler(ctx, OutPort, t.settings.Context)
 
 		case <-runCtx.Done():
