@@ -29,7 +29,7 @@ func (t *Component) Instance() module.Component {
 func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
-		Description: "Sync",
+		Description: "Modify",
 		Info:        "Sends a new message after incoming message received",
 		Tags:        []string{"SDK"},
 	}
