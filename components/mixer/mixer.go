@@ -19,7 +19,6 @@ type Mixer struct {
 	settings Settings
 	//
 	inputs cmap.ConcurrentMap[string, interface{}]
-
 	output Output
 }
 
@@ -85,8 +84,6 @@ func (m Output) Process(s *jsonschema.Schema) {
 	var output = jsonschema.Schema{}
 
 	output.WithType(jsonschema.Object.Type())
-	output.WithExtraPropertiesItem("path", "$")
-	//
 	//
 	for _, input := range m.inputNames {
 		defName := getDefinitionName(input)
@@ -94,13 +91,17 @@ func (m Output) Process(s *jsonschema.Schema) {
 
 		def := jsonschema.Schema{}
 		def.WithDescription(fmt.Sprintf("Arbitrary message %s", input))
-		def.WithExtraPropertiesItem("path", fmt.Sprintf("$.%s", propName))
 		defs[defName] = def
 
 		ref := jsonschema.Schema{}
 		ref.WithRef(fmt.Sprintf("#/$defs/%s", defName))
 		output.WithPropertiesItem(propName, ref.ToSchemaOrBool())
 	}
+
+	output.WithPropertiesItem("from", (&jsonschema.Schema{}).
+		WithType(jsonschema.String.Type()).
+		WithTitle("From").
+		WithDescription("Contains the name of the input port").ToSchemaOrBool())
 
 	defs["Output"] = output
 	return
@@ -141,14 +142,13 @@ func (m *Mixer) Handle(ctx context.Context, output module.Handler, port string, 
 
 		m.inputs.Set(getPropName(port), in.Context)
 
-		return m.send(ctx, output)
+		data := m.inputs.Items()
+		data["from"] = port
+		return output(ctx, OutputPort, data)
+
 	default:
 		return fmt.Errorf("unknown port: %s", port)
 	}
-}
-
-func (m *Mixer) send(ctx context.Context, output module.Handler) error {
-	return output(ctx, OutputPort, m.inputs)
 }
 
 func (m *Mixer) hasInput(name string) bool {
