@@ -3,7 +3,6 @@ package split
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
 )
@@ -15,6 +14,7 @@ const (
 )
 
 type Context any
+
 type ItemContext any
 
 type InMessage struct {
@@ -54,10 +54,6 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			}
 		}
 		return nil
-	}
-	_, err := uuid.NewUUID()
-	if err != nil {
-		return err
 	}
 	return fmt.Errorf("invalid message")
 }

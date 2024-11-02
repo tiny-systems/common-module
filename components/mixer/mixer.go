@@ -101,7 +101,7 @@ func (m Output) Process(s *jsonschema.Schema) {
 	output.WithPropertiesItem("from", (&jsonschema.Schema{}).
 		WithType(jsonschema.String.Type()).
 		WithTitle("From").
-		WithDescription("Contains the name of the input port").ToSchemaOrBool())
+		WithDescription("Name of the port initiated the signal").ToSchemaOrBool())
 
 	defs["Output"] = output
 	return
