@@ -11,7 +11,7 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/spyzhov/ajson v0.9.4
 	github.com/swaggest/jsonschema-go v0.3.70
-	github.com/tiny-systems/module v0.1.93
+	github.com/tiny-systems/module v0.1.95
 	go.opentelemetry.io/otel/trace v1.30.0
 )
 
@@ -129,5 +129,4 @@ require (
 )
 
 //replace github.com/tiny-systems/module => ../../module
-
 replace github.com/spyzhov/ajson v0.9.4 => github.com/tiny-systems/ajson v0.1.3
