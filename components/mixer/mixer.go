@@ -6,6 +6,7 @@ import (
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/schema"
 	"github.com/tiny-systems/module/registry"
 	"strings"
 )
@@ -107,8 +108,13 @@ func (m Output) Process(s *jsonschema.Schema) {
 	return
 }
 
+type InputSettings struct {
+	Name    string `json:"name" required:"true" title:"Input Name"`
+	Trigger bool   `json:"trigger" required:"true" title:"Trigger mode" description:"If enabled this input will trigger sending mixed output message"`
+}
+
 type Settings struct {
-	Inputs []string `json:"inputs" required:"true" title:"Inputs" minItems:"1" uniqueItems:"true"`
+	Inputs []InputSettings `json:"inputs" required:"true" title:"Inputs" minItems:"1" uniqueItems:"true"`
 }
 
 func (m *Mixer) GetInfo() module.ComponentInfo {
@@ -122,8 +128,7 @@ func (m *Mixer) GetInfo() module.ComponentInfo {
 
 func (m *Mixer) Handle(ctx context.Context, output module.Handler, port string, msg interface{}) error {
 
-	switch {
-	case port == module.SettingsPort:
+	if port == module.SettingsPort {
 		in, ok := msg.(Settings)
 		if !ok {
 			return fmt.Errorf("invalid settings")
@@ -131,33 +136,45 @@ func (m *Mixer) Handle(ctx context.Context, output module.Handler, port string, 
 		m.settings = in
 		// reset state after new settings
 		m.inputs.Clear()
-		m.output.inputNames = in.Inputs
-		return nil
 
-	case m.hasInput(port):
-		in, ok := msg.(Input)
-		if !ok {
-			return fmt.Errorf("invalid message type: %T", msg)
+		var inputNames = make([]string, len(in.Inputs))
+		for k, v := range in.Inputs {
+			inputNames[k] = v.Name
 		}
+		m.output.inputNames = inputNames
 
-		m.inputs.Set(getPropName(port), in.Context)
+		return nil
+	}
 
-		data := m.inputs.Items()
-		data["from"] = port
-		return output(ctx, OutputPort, data)
+	is := m.hasInput(port)
 
-	default:
+	if is == nil {
 		return fmt.Errorf("unknown port: %s", port)
 	}
+
+	in, ok := msg.(Input)
+	if !ok {
+		return fmt.Errorf("invalid message type: %T", msg)
+	}
+
+	m.inputs.Set(getPropName(port), in.Context)
+	if !is.Trigger {
+		return nil
+	}
+	// sending message
+	data := m.inputs.Items()
+	data["from"] = port
+
+	return output(ctx, OutputPort, data)
 }
 
-func (m *Mixer) hasInput(name string) bool {
+func (m *Mixer) hasInput(name string) *InputSettings {
 	for _, i := range m.settings.Inputs {
-		if i == name {
-			return true
+		if i.Name == name {
+			return &i
 		}
 	}
-	return false
+	return nil
 }
 
 func (m *Mixer) Ports() []module.Port {
@@ -176,15 +193,14 @@ func (m *Mixer) Ports() []module.Port {
 			Position:      module.Right,
 		},
 	}
-
 	//
 	for _, input := range m.settings.Inputs {
 		ports = append(ports, module.Port{
-			Name:   input,
-			Label:  strings.ToUpper(input),
+			Name:   input.Name,
+			Label:  strings.ToUpper(input.Name),
 			Source: true,
 			Configuration: Input{
-				nameOverride: input,
+				nameOverride: input.Name,
 			},
 			Position: module.Left,
 		})
@@ -195,7 +211,7 @@ func (m *Mixer) Ports() []module.Port {
 
 func (m *Mixer) Instance() module.Component {
 	return &Mixer{
-		settings: Settings{Inputs: []string{"A", "B"}},
+		settings: Settings{Inputs: []InputSettings{{Name: "A", Trigger: true}, {Name: "B", Trigger: true}}},
 		inputs:   cmap.New[interface{}](),
 	}
 }
@@ -209,6 +225,7 @@ func getPropName(input string) string {
 }
 
 var _ module.Component = (*Mixer)(nil)
+var _ schema.Processor = (*Input)(nil)
 
 func init() {
 	registry.Register(&Mixer{})
