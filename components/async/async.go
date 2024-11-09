@@ -38,6 +38,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 
 func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) error {
 	if in, ok := msg.(InMessage); ok {
+		// @todo goroutine leak
 		go func() {
 			_ = handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, in.Context)
 		}()
