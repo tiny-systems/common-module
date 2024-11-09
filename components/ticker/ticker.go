@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
+	"go.opentelemetry.io/otel/trace"
 	"time"
 )
 
@@ -63,7 +64,7 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 		timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
 		select {
 		case <-timer.C:
-			_ = handler(ctx, OutPort, t.settings.Context)
+			_ = handler(trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{})), OutPort, t.settings.Context)
 
 		case <-runCtx.Done():
 			timer.Stop()
