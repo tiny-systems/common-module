@@ -46,7 +46,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Ticker",
-		Info:        "Sends messages periodically with defined delay. Next message being sent as soon as port unblocked",
+		Info:        "Sends messages periodically with defined delay. Next message being sent as soon as port unblocked.",
 		Tags:        []string{"SDK"},
 	}
 }

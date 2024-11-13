@@ -31,7 +31,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Async",
-		Info:        "Asynchronously sends a new message after incoming message received",
+		Info:        "Asynchronously sends a new message after incoming message received.",
 		Tags:        []string{"SDK"},
 	}
 }
