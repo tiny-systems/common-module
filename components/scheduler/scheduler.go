@@ -13,12 +13,15 @@ const (
 	ComponentName        = "scheduler"
 	OutPort       string = "out"
 	InPort        string = "in"
-	Start         string = "start"
+	StartPort     string = "start"
 	AckPort       string = "ack"
 )
 
 type Settings struct {
 	EnableAckPort bool `json:"enableAckPort" title:"Enable task acknowledge port" description:"Port gives information if incoming task was scheduled properly"`
+}
+
+type Start struct {
 }
 
 type Context any
@@ -93,7 +96,7 @@ func (s *Component) Handle(ctx context.Context, handler module.Handler, port str
 		return nil
 	}
 
-	if port == Start {
+	if port == StartPort {
 		return s.emit(ctx)
 	}
 
@@ -172,6 +175,13 @@ func (s *Component) Ports() []module.Port {
 			Label:         "Settings",
 			Source:        true,
 			Configuration: Settings{},
+		},
+		{
+			Name:          StartPort,
+			Label:         "Start",
+			Source:        true,
+			Configuration: Start{},
+			Position:      module.Left,
 		},
 		{
 			Name:   InPort,
