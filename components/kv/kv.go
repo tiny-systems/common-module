@@ -77,7 +77,7 @@ func (k *KeyValueStore) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        "in_memory_kv",
 		Description: "Key-value Store",
-		Info:        "In memory key value store. Requires incoming message to be an object with non empty field ID",
+		Info:        "In memory key value store. Requires incoming message to be an object with non empty field ID.",
 		Tags:        []string{"kv", "db", "storage"},
 	}
 }

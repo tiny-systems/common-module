@@ -38,7 +38,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Split Array",
-		Info:        "Splits any array into chunks and send further as separate messages",
+		Info:        "Splits any array into chunks and send further as separate messages.",
 		Tags:        []string{"SDK", "ARRAY"},
 	}
 }
