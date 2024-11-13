@@ -13,6 +13,7 @@ const (
 	ComponentName        = "scheduler"
 	OutPort       string = "out"
 	InPort        string = "in"
+	Start         string = "start"
 	AckPort       string = "ack"
 )
 
@@ -41,7 +42,8 @@ type OutMessage struct {
 type TaskAck struct {
 	Task        Task    `json:"task"`
 	Context     Context `json:"context"`
-	ScheduledOn int64   `json:"scheduledOn"`
+	ScheduledIn int64   `json:"scheduledIn"`
+	Error       *string `json:"error"`
 }
 
 type task struct {
@@ -76,7 +78,7 @@ func (s *Component) emit(ctx context.Context) error {
 		go s.waitTask(ctx, v)
 	}
 	<-ctx.Done()
-	return ctx.Err()
+	return nil
 }
 
 func (s *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) error {
@@ -89,6 +91,10 @@ func (s *Component) Handle(ctx context.Context, handler module.Handler, port str
 		}
 		s.settings = in
 		return nil
+	}
+
+	if port == Start {
+		return s.emit(ctx)
 	}
 
 	if port != InPort {
@@ -112,7 +118,7 @@ func (s *Component) Handle(ctx context.Context, handler module.Handler, port str
 		if err := handler(ctx, AckPort, TaskAck{
 			Task:        in.Task,
 			Context:     in.Context,
-			ScheduledOn: scheduledIn,
+			ScheduledIn: scheduledIn,
 		}); err != nil {
 			return err
 		}
