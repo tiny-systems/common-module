@@ -70,7 +70,7 @@ func (s *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Scheduler",
-		Info:        "Collects tasks messages. When its running sends messages further when scheduled date and time come. Tasks with same IDs are updating scheduled date and task itself. If scheduled date is already passed - sends message as soon as being started",
+		Info:        "Collects tasks messages. When its running sends messages further when scheduled date and time come. Tasks with same IDs are updating scheduled date and task itself. If scheduled date is already passed - sends message as soon as being started.",
 		Tags:        []string{"SDK"},
 	}
 }

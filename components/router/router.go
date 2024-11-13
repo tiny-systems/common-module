@@ -81,7 +81,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Router",
-		Info:        "Routes incoming messages depends on message itself",
+		Info:        "Routes incoming messages depends on message itself.",
 		Tags:        []string{"SDK"},
 	}
 }
