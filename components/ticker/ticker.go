@@ -6,6 +6,7 @@ import (
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
 	"go.opentelemetry.io/otel/trace"
+	"sync"
 	"time"
 )
 
@@ -24,22 +25,34 @@ type Settings struct {
 
 type Component struct {
 	settings Settings
-	cancel   context.CancelFunc
 	ctx      context.Context
+
+	cancelFunc     context.CancelFunc
+	cancelFuncLock *sync.Mutex
+
+	runLock *sync.Mutex
 }
 
 func (t *Component) Instance() module.Component {
 	return &Component{
+		cancelFuncLock: &sync.Mutex{},
+		runLock:        &sync.Mutex{},
 		settings: Settings{
 			Delay: 1000,
 		},
 	}
 }
 
-type Control struct {
+type StartControl struct {
 	Context Context `json:"context" required:"true" title:"Context"`
-	Start   bool    `json:"start" format:"button" colSpan:"col-span-6" title:"Start" required:"true"`
-	Stop    bool    `json:"stop" format:"button" colSpan:"col-span-6" title:"Stop" required:"true"`
+	Status  string  `json:"status" title:"Status" readonly:"true"`
+	Start   bool    `json:"start" format:"button" title:"Start" required:"true"`
+}
+
+type StopControl struct {
+	Context Context `json:"context" required:"true" title:"Context"`
+	Status  string  `json:"status" title:"Status" readonly:"true"`
+	Stop    bool    `json:"stop" format:"button" title:"Stop" required:"true"`
 }
 
 func (t *Component) GetInfo() module.ComponentInfo {
@@ -54,11 +67,20 @@ func (t *Component) GetInfo() module.ComponentInfo {
 // Emit non a pointer receiver copies Component with copy of settings
 func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 
-	var runCtx context.Context
-	runCtx, t.cancel = context.WithCancel(ctx)
+	t.runLock.Lock()
+	defer t.runLock.Unlock()
 
-	// redraw
-	_ = handler(ctx, module.ReconcilePort, nil)
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
+	t.setCancelFunc(runCancel)
+	// reconcile so show we are listening
+	_ = handler(context.Background(), module.ReconcilePort, nil)
+
+	defer func() {
+		t.setCancelFunc(nil)
+		_ = handler(context.Background(), module.ReconcilePort, nil)
+	}()
 
 	for {
 		timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
@@ -76,53 +98,51 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) error {
 
 	switch port {
-	case module.ControlPort:
-		in, ok := msg.(Control)
-		if !ok {
-			return fmt.Errorf("invalid input msg")
-		}
-
-		t.settings.Context = in.Context
-
-		if in.Stop && t.cancel != nil {
-			// we are running and asked to stop
-			t.cancel()
-			t.cancel = nil
-			// redraw
-			_ = handler(ctx, module.ReconcilePort, nil)
-			return nil
-		}
-		if in.Start && t.cancel == nil {
-			//asked to start and not running
-			return t.emit(ctx, handler)
-		}
 	case module.SettingsPort:
 		in, ok := msg.(Settings)
 		if !ok {
 			return fmt.Errorf("invalid settings")
 		}
 		t.settings = in
+		return nil
 
-		if t.settings.Auto {
-
-			// stop if its already running
-			if t.cancel != nil {
-				t.cancel()
-				t.cancel = nil
-			}
+	case module.ControlPort:
+		if msg == nil {
+			break
+		}
+		switch msg.(type) {
+		case StartControl:
+			t.settings.Context = msg.(StartControl).Context
 			return t.emit(ctx, handler)
+		case StopControl:
+			return t.stop()
 		}
 	}
-	return nil
+
+	return fmt.Errorf("invalid port: %s", port)
 }
 
-func (t *Component) getControl() Control {
-	c := Control{
-		Stop:    t.cancel == nil,
-		Start:   t.cancel != nil,
-		Context: t.settings.Context,
+func (t *Component) setCancelFunc(f func()) {
+	t.cancelFuncLock.Lock()
+	defer t.cancelFuncLock.Unlock()
+	t.cancelFunc = f
+}
+
+func (t *Component) isRunning() bool {
+	t.cancelFuncLock.Lock()
+	defer t.cancelFuncLock.Unlock()
+
+	return t.cancelFunc != nil
+}
+
+func (t *Component) stop() error {
+	t.cancelFuncLock.Lock()
+	defer t.cancelFuncLock.Unlock()
+	if t.cancelFunc == nil {
+		return nil
 	}
-	return c
+	t.cancelFunc()
+	return nil
 }
 
 func (t *Component) Ports() []module.Port {
@@ -149,6 +169,19 @@ func (t *Component) Ports() []module.Port {
 	}
 
 	return ports
+}
+
+func (t *Component) getControl() interface{} {
+	if t.isRunning() {
+		return StopControl{
+			Status:  "Running",
+			Context: t.settings.Context,
+		}
+	}
+	return StartControl{
+		Context: t.settings.Context,
+		Status:  "Not running",
+	}
 }
 
 var _ module.Component = (*Component)(nil)
