@@ -104,6 +104,13 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			return fmt.Errorf("invalid settings")
 		}
 		t.settings = in
+
+		if t.settings.Auto {
+			// stop if its already running
+			_ = t.stop()
+			return t.emit(ctx, handler)
+		}
+
 		return nil
 
 	case module.ControlPort:
