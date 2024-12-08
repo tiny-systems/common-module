@@ -47,8 +47,8 @@ func (r *RouteName) JSONSchema() (jsonschema.Schema, error) {
 }
 
 type Condition struct {
-	RouteName RouteName `json:"route" title:"Route" required:"true"`
-	Condition bool      `json:"condition" required:"true" title:"Condition"`
+	RouteName *RouteName `json:"route" title:"Route" required:"true"`
+	Condition bool       `json:"condition" required:"true" title:"Condition"`
 }
 
 type Settings struct {
@@ -122,7 +122,7 @@ func (t *Component) Ports() []module.Port {
 
 	inMessage := InMessage{
 		Conditions: []Condition{{
-			RouteName: RouteName{Value: val, Options: t.settings.Routes},
+			RouteName: &RouteName{Value: val, Options: t.settings.Routes},
 			Condition: true,
 		}},
 	}
