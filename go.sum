@@ -247,6 +247,14 @@ github.com/tiny-systems/module v0.1.116 h1:1MrvbsqZBbKYrgEdtUcQ4YhQcZ6ZvThmEryjM
 github.com/tiny-systems/module v0.1.116/go.mod h1:xJstbUaow3gPhkD3pTlwGSp0jSw4EVya5ULLpvCg2d4=
 github.com/tiny-systems/module v0.1.117 h1:ESfopHBN8tOIRZxUcmOJNSAjhnG4MwDyafnW972ujGc=
 github.com/tiny-systems/module v0.1.117/go.mod h1:xJstbUaow3gPhkD3pTlwGSp0jSw4EVya5ULLpvCg2d4=
+github.com/tiny-systems/module v0.1.118 h1:uGiRz29NV4zP2mi5sxIPs49eppfNhM83x++awadm3es=
+github.com/tiny-systems/module v0.1.118/go.mod h1:xJstbUaow3gPhkD3pTlwGSp0jSw4EVya5ULLpvCg2d4=
+github.com/tiny-systems/module v0.1.119 h1:3Jrs02iLcw1EHIJuSroPdMBEc0TU5v0OLW+kkYsoXg8=
+github.com/tiny-systems/module v0.1.119/go.mod h1:xJstbUaow3gPhkD3pTlwGSp0jSw4EVya5ULLpvCg2d4=
+github.com/tiny-systems/module v0.1.120 h1:rgKhnUWIXLsAhzZq/Jx3uLyEa9KFQU10NNPQ+aHw0pQ=
+github.com/tiny-systems/module v0.1.120/go.mod h1:xJstbUaow3gPhkD3pTlwGSp0jSw4EVya5ULLpvCg2d4=
+github.com/tiny-systems/module v0.1.121 h1:hgcPCZ09mqeQVVMS+Fmgc+mGtDinKgDLCb1NQHHgjBI=
+github.com/tiny-systems/module v0.1.121/go.mod h1:xJstbUaow3gPhkD3pTlwGSp0jSw4EVya5ULLpvCg2d4=
 github.com/tiny-systems/platform-api v0.0.10 h1:XFP0EgeDhjXtm7etBjBJrcih/z0BLXor3pcOjDuk1R8=
 github.com/tiny-systems/platform-api v0.0.10/go.mod h1:wZ5N4GR33bkFdryDGJuX2Oni9mtgTuXwdM/jHhLsAWU=
 github.com/ugorji/go/codec v1.2.11 h1:BMaWp1Bb6fHwEtbplGBGJ498wD+LKlNSl25MjdZY4dU=
