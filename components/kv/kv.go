@@ -33,7 +33,6 @@ func (k KeyValueStoreDocument) PrepareJSONSchema(schema *jsonschema.Schema) erro
 		id := jsonschema.Schema{}
 		id.AddType(jsonschema.String)
 		id.WithTitle("ID")
-		id.WithRequired("id")
 		schema.WithRequired("id")
 		schema.Properties = map[string]jsonschema.SchemaOrBool{"id": id.ToSchemaOrBool()}
 	}
