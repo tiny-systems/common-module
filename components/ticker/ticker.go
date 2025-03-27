@@ -2,6 +2,7 @@ package ticker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
@@ -90,7 +91,13 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 
 		case <-runCtx.Done():
 			timer.Stop()
-			return runCtx.Err()
+
+			err := runCtx.Err()
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+
+			return err
 		}
 	}
 }
