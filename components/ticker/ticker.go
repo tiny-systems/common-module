@@ -83,15 +83,14 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 		_ = handler(context.Background(), module.ReconcilePort, nil)
 	}()
 
+	timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
+	defer timer.Stop()
 	for {
-		timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
 		select {
 		case <-timer.C:
 			_ = handler(trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{})), OutPort, t.settings.Context)
 
 		case <-runCtx.Done():
-			timer.Stop()
-
 			err := runCtx.Err()
 			if errors.Is(err, context.Canceled) {
 				return nil
@@ -150,8 +149,10 @@ func (t *Component) isRunning() bool {
 }
 
 func (t *Component) stop() error {
+
 	t.cancelFuncLock.Lock()
 	defer t.cancelFuncLock.Unlock()
+
 	if t.cancelFunc == nil {
 		return nil
 	}
