@@ -89,6 +89,7 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 		select {
 		case <-timer.C:
 			_ = handler(trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{})), OutPort, t.settings.Context)
+			timer.Reset(time.Duration(t.settings.Delay) * time.Millisecond)
 
 		case <-runCtx.Done():
 			err := runCtx.Err()
