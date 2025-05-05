@@ -21,7 +21,6 @@ type Context any
 type Settings struct {
 	Context Context `json:"context,omitempty" configurable:"true" title:"Context" description:"Arbitrary message to be send each period of time"`
 	Delay   int     `json:"delay" required:"true" title:"Delay (ms)" description:"Delay between signals" minimum:"0" default:"1000"`
-	Auto    bool    `json:"auto" title:"Auto send" required:"true" description:"Start sending as soon as component configured"`
 }
 
 type Component struct {
@@ -111,12 +110,6 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			return fmt.Errorf("invalid settings")
 		}
 		t.settings = in
-
-		if t.settings.Auto {
-			// stop if its already running
-			_ = t.stop()
-			return t.emit(ctx, handler)
-		}
 
 		return nil
 
