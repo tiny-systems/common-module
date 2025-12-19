@@ -3,8 +3,12 @@ package signal
 import (
 	"context"
 	"fmt"
+	"github.com/swaggest/jsonschema-go"
+	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
+	"sync"
 )
 
 const (
@@ -19,17 +23,32 @@ type Settings struct {
 }
 
 type Component struct {
-	settings Settings
+	settings       Settings
+	cancelFuncLock *sync.Mutex
+	cancelFunc     context.CancelFunc
 }
 
 type Control struct {
-	Context Context `json:"context" required:"true" title:"Context"`
-	Send    bool    `json:"send" format:"button" title:"Send" required:"true"`
+	Context     Context `json:"context" required:"true" title:"Context"`
+	Send        bool    `json:"send" format:"button" title:"Send" required:"true" colSpan:"col-span-6"`
+	Reset       bool    `json:"reset" format:"button" title:"Reset" required:"true" colSpan:"col-span-6"`
+	ResetEnable bool    `json:"-" jsonschema:"-"`
+}
+
+func (c Control) PrepareJSONSchema(schema *jsonschema.Schema) error {
+	if c.ResetEnable {
+		delete(schema.Properties, "send")
+		return nil
+	}
+
+	delete(schema.Properties, "reset")
+	return nil
 }
 
 func (t *Component) Instance() module.Component {
 	return &Component{
-		settings: Settings{},
+		cancelFuncLock: &sync.Mutex{},
+		settings:       Settings{},
 	}
 }
 
@@ -42,20 +61,57 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) error {
+func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
 
 	switch port {
-	case module.ControlPort:
+	case v1alpha1.ControlPort:
+
+		if !utils.IsLeader(ctx) {
+			// only leader propagates request further to avoid x (amount of replicas) multiply
+			return nil
+		}
+
 		in, ok := msg.(Control)
 		if !ok {
 			return fmt.Errorf("invalid input msg")
 		}
 
-		t.settings.Context = in.Context
-		_ = handler(ctx, module.ReconcilePort, nil)
+		if in.Reset {
+			t.settings.Context = nil
+		} else {
+			t.settings.Context = in.Context
+		}
+
+		t.cancelFuncLock.Lock()
+
+		if t.cancelFunc != nil {
+			t.cancelFunc()
+			t.cancelFunc = nil
+		}
+		t.cancelFuncLock.Unlock()
+
+		if in.Reset {
+			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+
+			// so signal controller do not try bomb us all the time we stay put
+			<-ctx.Done()
+			// we block signal
+			return ctx.Err()
+		}
+
+		t.cancelFuncLock.Lock()
+		ctx, t.cancelFunc = context.WithCancel(ctx)
+		t.cancelFuncLock.Unlock()
+
+		//
+		_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+
+		// we blocked by requested resource
 		_ = handler(ctx, OutPort, in.Context)
 
-	case module.SettingsPort:
+		return ctx.Err()
+
+	case v1alpha1.SettingsPort:
 		in, ok := msg.(Settings)
 		if !ok {
 			return fmt.Errorf("invalid settings")
@@ -67,25 +123,30 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 }
 
 func (t *Component) Ports() []module.Port {
+
+	t.cancelFuncLock.Lock()
+	defer t.cancelFuncLock.Unlock()
+
 	return []module.Port{
 		{
-			Name:          module.SettingsPort,
+			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
-			Source:        true,
 			Configuration: t.settings,
 		},
 		{
 			Name:          OutPort,
 			Label:         "Out",
-			Source:        false,
+			Source:        true,
 			Position:      module.Right,
 			Configuration: new(Context),
 		},
 		{
-			Name:  module.ControlPort,
-			Label: "Control",
+			Name:   v1alpha1.ControlPort,
+			Label:  "Control",
+			Source: true,
 			Configuration: Control{
-				Context: t.settings.Context,
+				Context:     t.settings.Context,
+				ResetEnable: t.cancelFunc != nil,
 			},
 		},
 	}
