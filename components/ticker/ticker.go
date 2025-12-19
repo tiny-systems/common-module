@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/swaggest/jsonschema-go"
+	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
 	"go.opentelemetry.io/otel/trace"
 	"sync"
@@ -43,23 +46,30 @@ func (t *Component) Instance() module.Component {
 	}
 }
 
-type StartControl struct {
-	Context Context `json:"context" required:"true" title:"Context"`
-	Status  string  `json:"status" title:"Status" readonly:"true"`
-	Start   bool    `json:"start" format:"button" title:"Start" required:"true"`
-}
-
-type StopControl struct {
+type Control struct {
 	Context Context `json:"context" required:"true" title:"Context"`
 	Status  string  `json:"status" title:"Status" readonly:"true"`
 	Stop    bool    `json:"stop" format:"button" title:"Stop" required:"true"`
+	Start   bool    `json:"start" format:"button" title:"Start" required:"true"`
 }
+
+func (c Control) PrepareJSONSchema(schema *jsonschema.Schema) error {
+
+	if c.Start {
+		delete(schema.Properties, "stop")
+	} else {
+		delete(schema.Properties, "start")
+	}
+	return nil
+}
+
+var _ jsonschema.Preparer = (*Control)(nil)
 
 func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Ticker",
-		Info:        "Sends messages periodically with defined delay. Next message being sent as soon as port unblocked.",
+		Info:        "Sends messages periodically with defined delay. Next message being sent as soon the Output port gets unblocked.",
 		Tags:        []string{"SDK"},
 	}
 }
@@ -75,11 +85,11 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 
 	t.setCancelFunc(runCancel)
 	// reconcile so show we are listening
-	_ = handler(context.Background(), module.ReconcilePort, nil)
+	_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
 
 	defer func() {
 		t.setCancelFunc(nil)
-		_ = handler(context.Background(), module.ReconcilePort, nil)
+		_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
 	}()
 
 	timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
@@ -101,10 +111,10 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) error {
+func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
 
 	switch port {
-	case module.SettingsPort:
+	case v1alpha1.SettingsPort:
 		in, ok := msg.(Settings)
 		if !ok {
 			return fmt.Errorf("invalid settings")
@@ -113,16 +123,21 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 
 		return nil
 
-	case module.ControlPort:
+	case v1alpha1.ControlPort:
 		if msg == nil {
 			break
 		}
+
+		if !utils.IsLeader(ctx) {
+			return nil
+		}
 		switch msg.(type) {
-		case StartControl:
-			t.settings.Context = msg.(StartControl).Context
+		case Control:
+			if msg.(Control).Stop {
+				return t.stop()
+			}
+			t.settings.Context = msg.(Control).Context
 			return t.emit(ctx, handler)
-		case StopControl:
-			return t.stop()
 		}
 	}
 
@@ -158,21 +173,21 @@ func (t *Component) Ports() []module.Port {
 
 	ports := []module.Port{
 		{
-			Name:          module.SettingsPort,
+			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
-			Source:        true,
 			Configuration: t.settings,
 		},
 		{
 			Name:          OutPort,
 			Label:         "Out",
-			Source:        false,
+			Source:        true,
 			Position:      module.Right,
 			Configuration: new(Context),
 		},
 		{
-			Name:          module.ControlPort,
+			Name:          v1alpha1.ControlPort,
 			Label:         "Control",
+			Source:        true,
 			Configuration: t.getControl(),
 		},
 	}
@@ -182,14 +197,16 @@ func (t *Component) Ports() []module.Port {
 
 func (t *Component) getControl() interface{} {
 	if t.isRunning() {
-		return StopControl{
+		return Control{
 			Status:  "Running",
 			Context: t.settings.Context,
+			Stop:    true,
 		}
 	}
-	return StartControl{
+	return Control{
 		Context: t.settings.Context,
 		Status:  "Not running",
+		Start:   true,
 	}
 }
 

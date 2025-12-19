@@ -37,7 +37,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) error {
+func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
 
 	in, ok := msg.(Request)
 	if !ok {
@@ -55,9 +55,8 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 func (t *Component) Ports() []module.Port {
 	return []module.Port{
 		{
-			Name:   InPort,
-			Label:  "In",
-			Source: true,
+			Name:  InPort,
+			Label: "In",
 			Configuration: Request{
 				Delay: 1000,
 			},
@@ -66,7 +65,7 @@ func (t *Component) Ports() []module.Port {
 		{
 			Name:          OutPort,
 			Label:         "Out",
-			Source:        false,
+			Source:        true,
 			Configuration: new(Context),
 			Position:      module.Right,
 		},
