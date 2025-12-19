@@ -3,11 +3,12 @@ package split
 import (
 	"context"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/utils"
 	"reflect"
 	"testing"
 )
 
-type h func(ctx context.Context, handler module.Handler, port string, msg interface{}) error
+type h func(ctx context.Context, handler module.Handler, port string, msg interface{}) any
 
 func TestSplit_Handle(t1 *testing.T) {
 	type args struct {
@@ -19,14 +20,14 @@ func TestSplit_Handle(t1 *testing.T) {
 
 	tests := []struct {
 		name       string
-		handleFunc func(t1 *testing.T, handle h) error
+		handleFunc func(t1 *testing.T, handle h) any
 		wantErr    bool
 	}{
 		{
 			name:    "test invalid message",
 			wantErr: true,
-			handleFunc: func(t *testing.T, handle h) error {
-				return handle(context.Background(), func(ctx context.Context, port string, data interface{}) error {
+			handleFunc: func(t *testing.T, handle h) any {
+				return handle(context.Background(), func(ctx context.Context, port string, data interface{}) any {
 					// should not be triggered cause message is invalid
 					t.Error("output handler should not be triggered if income message is invalid")
 					return nil
@@ -37,8 +38,8 @@ func TestSplit_Handle(t1 *testing.T) {
 		{
 			name:    "OK empty message",
 			wantErr: false,
-			handleFunc: func(t *testing.T, handle h) error {
-				return handle(context.Background(), func(ctx context.Context, port string, data interface{}) error {
+			handleFunc: func(t *testing.T, handle h) any {
+				return handle(context.Background(), func(ctx context.Context, port string, data interface{}) any {
 					// should not be triggered cause message is invalid
 					t.Error("output handler should not be triggered if income message is empty")
 					return nil
@@ -47,7 +48,7 @@ func TestSplit_Handle(t1 *testing.T) {
 		},
 		{
 			name: "OK message",
-			handleFunc: func(t *testing.T, handle h) error {
+			handleFunc: func(t *testing.T, handle h) any {
 				var counter int
 
 				var msg = InMessage{
@@ -64,7 +65,7 @@ func TestSplit_Handle(t1 *testing.T) {
 					}
 				}()
 
-				var resp = func(ctx context.Context, port string, data interface{}) error {
+				var resp = func(ctx context.Context, port string, data interface{}) any {
 					counter++
 					if port != OutPort {
 						t1.Fatalf("invalid output port: %v", port)
@@ -91,8 +92,8 @@ func TestSplit_Handle(t1 *testing.T) {
 	for _, tt := range tests {
 		t1.Run(tt.name, func(t1 *testing.T) {
 			t := &Component{}
-			if err := tt.handleFunc(t1, t.Handle); (err != nil) != tt.wantErr {
-				t1.Errorf("Handle() error = %v, wantErr %v", err, tt.wantErr)
+			if resp := tt.handleFunc(t1, t.Handle); (utils.CheckForError(resp) != nil) != tt.wantErr {
+				t1.Errorf("Handle() error = %v, wantErr %v", resp, tt.wantErr)
 			}
 		})
 	}

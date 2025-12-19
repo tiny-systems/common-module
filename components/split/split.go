@@ -43,7 +43,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) error {
+func (t *Component) Handle(ctx context.Context, handler module.Handler, _ string, msg interface{}) any {
 	if in, ok := msg.(InMessage); ok {
 		for _, item := range in.Array {
 			if err := handler(ctx, OutPort, OutMessage{
@@ -63,14 +63,13 @@ func (t *Component) Ports() []module.Port {
 		{
 			Name:          InPort,
 			Label:         "In",
-			Source:        true,
 			Configuration: InMessage{},
 			Position:      module.Left,
 		},
 		{
 			Name:          OutPort,
 			Label:         "Out",
-			Source:        false,
+			Source:        true,
 			Configuration: OutMessage{},
 			Position:      module.Right,
 		},

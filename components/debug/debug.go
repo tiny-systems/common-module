@@ -3,6 +3,7 @@ package debug
 import (
 	"context"
 	"fmt"
+	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
 )
@@ -39,10 +40,10 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, output module.Handler, port string, msg interface{}) error {
+func (t *Component) Handle(ctx context.Context, output module.Handler, port string, msg interface{}) any {
 
 	switch port {
-	case module.SettingsPort:
+	case v1alpha1.SettingsPort:
 		in, ok := msg.(Settings)
 		if !ok {
 			return fmt.Errorf("invalid settings")
@@ -52,7 +53,9 @@ func (t *Component) Handle(ctx context.Context, output module.Handler, port stri
 	case InPort:
 		if in, ok := msg.(InMessage); ok {
 			t.settings.Context = in.Context
-			return output(ctx, module.ReconcilePort, nil)
+			_ = output(ctx, v1alpha1.ReconcilePort, nil)
+			return nil
+
 		}
 		return fmt.Errorf("invalid message in")
 	}
@@ -65,21 +68,20 @@ func (t *Component) Ports() []module.Port {
 		{
 			Name:          InPort,
 			Label:         "In",
-			Source:        true,
 			Configuration: InMessage{},
 			Position:      module.Left,
 		},
 		{
-			Name:  module.ControlPort,
-			Label: "Control",
+			Name:   v1alpha1.ControlPort,
+			Label:  "Control",
+			Source: true,
 			Configuration: Control{
 				Context: t.settings.Context,
 			},
 		},
 		{
-			Name:          module.SettingsPort,
+			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
-			Source:        true,
 			Configuration: t.settings,
 		},
 	}

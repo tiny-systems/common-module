@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/goccy/go-json"
 	"github.com/swaggest/jsonschema-go"
+	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
 	"strings"
@@ -86,8 +87,8 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) error {
-	if port == module.SettingsPort {
+func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
+	if port == v1alpha1.SettingsPort {
 		in, ok := msg.(Settings)
 		if !ok {
 			return fmt.Errorf("invalid settings")
@@ -129,16 +130,14 @@ func (t *Component) Ports() []module.Port {
 
 	ports := []module.Port{
 		{
-			Name:          module.SettingsPort,
+			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
-			Source:        true,
 			Configuration: t.settings,
 		},
 		{
 			Position:      module.Left,
 			Name:          InPort,
 			Label:         "IN",
-			Source:        true,
 			Configuration: inMessage,
 		},
 	}
@@ -147,7 +146,7 @@ func (t *Component) Ports() []module.Port {
 			Position:      module.Right,
 			Name:          getPortNameFromRoute(r),
 			Label:         strings.ToTitle(r),
-			Source:        false,
+			Source:        true,
 			Configuration: new(Context),
 		})
 	}
@@ -156,7 +155,7 @@ func (t *Component) Ports() []module.Port {
 			Position:      module.Bottom,
 			Name:          DefaultPort,
 			Label:         "Default",
-			Source:        false,
+			Source:        true,
 			Configuration: new(Context),
 		})
 	}
