@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	ComponentName        = "common_modify"
+	ComponentName        = "modify"
 	InPort        string = "in"
 	OutPort       string = "out"
 )
@@ -30,7 +30,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Modify",
-		Info:        "Sends a new message after incoming message received.",
+		Info:        "Data transformer for connecting output back to input on the SAME node (e.g., http_server request→response loops). AVOID using modify between DIFFERENT nodes - configure data mapping directly on the edge instead. Edge configuration can set literal values and map fields without needing modify in between.",
 		Tags:        []string{"SDK"},
 	}
 }
@@ -63,5 +63,5 @@ func (t *Component) Ports() []module.Port {
 var _ module.Component = (*Component)(nil)
 
 func init() {
-	registry.Register(&Component{})
+	registry.Register((&Component{}).Instance())
 }

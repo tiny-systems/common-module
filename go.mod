@@ -10,7 +10,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.19.0
 	github.com/swaggest/jsonschema-go v0.3.70
-	github.com/tiny-systems/module v0.1.165
+	github.com/tiny-systems/module v0.1.171
 	go.opentelemetry.io/otel/trace v1.35.0
 )
 
@@ -136,7 +136,7 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/swaggest/refl v1.3.0 // indirect
 	github.com/tiny-systems/errorpanic v0.7.1 // indirect
-	github.com/tiny-systems/platform-api v0.0.10 // indirect
+	github.com/tiny-systems/platform-api v0.0.13 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect

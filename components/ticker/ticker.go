@@ -69,7 +69,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Ticker",
-		Info:        "Sends messages periodically with defined delay. Next message being sent as soon the Output port gets unblocked.",
+		Info:        "Periodic emitter. Click Start to begin emitting context on Out. Uses blocking API: waits for Out port to unblock (downstream completes), then waits [delay] ms before next emit. Click Stop to pause. Use for polling or scheduled triggers.",
 		Tags:        []string{"SDK"},
 	}
 }
@@ -213,5 +213,5 @@ func (t *Component) getControl() interface{} {
 var _ module.Component = (*Component)(nil)
 
 func init() {
-	registry.Register(&Component{})
+	registry.Register((&Component{}).Instance())
 }
