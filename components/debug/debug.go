@@ -35,7 +35,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Debug",
-		Info:        "Consumes any data without sending it anywhere. Displays the latest message using control port.",
+		Info:        "Message sink for inspection. Receives messages on In (no output ports). Displays last received message in Control port. Use as flow endpoint to inspect data or terminate unused branches.",
 		Tags:        []string{"SDK"},
 	}
 }
@@ -94,5 +94,5 @@ func (t *Component) Instance() module.Component {
 var _ module.Component = (*Component)(nil)
 
 func init() {
-	registry.Register(&Component{})
+	registry.Register((&Component{}).Instance())
 }

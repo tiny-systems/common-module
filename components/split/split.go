@@ -38,7 +38,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Split Array",
-		Info:        "Splits any array into chunks and send further as separate messages.",
+		Info:        "Array iterator. Input: context + array. Emits one message per array element on Out, each containing {context, item}. Elements are processed sequentially - next item sent after previous Out completes. Use to process lists item by item.",
 		Tags:        []string{"SDK", "ARRAY"},
 	}
 }
@@ -77,5 +77,5 @@ func (t *Component) Ports() []module.Port {
 }
 
 func init() {
-	registry.Register(&Component{})
+	registry.Register((&Component{}).Instance())
 }
