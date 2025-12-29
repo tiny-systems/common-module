@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/goccy/go-json"
 	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -82,7 +83,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Router",
-		Info:        "Routes incoming messages depends on message itself.",
+		Info:        "Conditional message router. Configure routes via settings (e.g., routes=[\"POST\", \"OTHER\"]). Output ports are named out_<lowercase(route)> (e.g., out_post, out_other). Input: context (data to forward) + conditions array (each with route name and boolean). Routes context to FIRST condition where condition=true. If NO condition is true: with enableDefaultPort=true, routes to 'default' port (use for else/fallback logic); with enableDefaultPort=false, message is dropped.",
 		Tags:        []string{"SDK"},
 	}
 }
@@ -101,6 +102,8 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 	if !ok {
 		return fmt.Errorf("invalid message")
 	}
+
+	spew.Dump(in.Conditions)
 
 	for _, condition := range in.Conditions {
 		if condition.Condition {
@@ -170,5 +173,5 @@ var _ module.Component = (*Component)(nil)
 var _ jsonschema.Exposer = (*RouteName)(nil)
 
 func init() {
-	registry.Register(&Component{})
+	registry.Register((&Component{}).Instance())
 }

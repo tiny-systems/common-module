@@ -32,7 +32,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Delay",
-		Info:        "Sleeps before passing incoming messages further",
+		Info:        "Timed pause. Receives context + delay (ms) on In, sleeps for specified duration (blocking upstream), then emits context on Out. Use for rate limiting or adding pauses between operations.",
 		Tags:        []string{"SDK"},
 	}
 }
@@ -75,5 +75,5 @@ func (t *Component) Ports() []module.Port {
 var _ module.Component = (*Component)(nil)
 
 func init() {
-	registry.Register(&Component{})
+	registry.Register((&Component{}).Instance())
 }

@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	ComponentName        = "common_async"
+	ComponentName        = "async"
 	InPort        string = "in"
 	OutPort       string = "out"
 )
@@ -31,7 +31,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Async",
-		Info:        "Asynchronously sends a new message after incoming message received.",
+		Info:        "Non-blocking pass-through. Returns immediately (unblocks sender), then emits context on Out in a goroutine. Warning: if downstream is blocked, goroutines accumulate and may cause memory issues. Use carefully with rate-controlled sources.",
 		Tags:        []string{"SDK"},
 	}
 }
@@ -68,5 +68,5 @@ func (t *Component) Ports() []module.Port {
 var _ module.Component = (*Component)(nil)
 
 func init() {
-	registry.Register(&Component{})
+	registry.Register((&Component{}).Instance())
 }
