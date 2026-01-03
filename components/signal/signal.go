@@ -24,6 +24,7 @@ type Settings struct {
 
 type Component struct {
 	settings       Settings
+	controlContext Context // Store control context separately from settings
 	cancelFuncLock *sync.Mutex
 	cancelFunc     context.CancelFunc
 }
@@ -77,9 +78,9 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		}
 
 		if in.Reset {
-			t.settings.Context = nil
+			t.controlContext = nil
 		} else {
-			t.settings.Context = in.Context
+			t.controlContext = in.Context
 		}
 
 		t.cancelFuncLock.Lock()
@@ -145,11 +146,19 @@ func (t *Component) Ports() []module.Port {
 			Label:  "Control",
 			Source: true,
 			Configuration: Control{
-				Context:     t.settings.Context,
+				Context:     t.getControlContext(),
 				ResetEnable: t.cancelFunc != nil,
 			},
 		},
 	}
+}
+
+// getControlContext returns the control context if set, otherwise falls back to settings context
+func (t *Component) getControlContext() Context {
+	if t.controlContext != nil {
+		return t.controlContext
+	}
+	return t.settings.Context
 }
 
 var _ module.Component = (*Component)(nil)
