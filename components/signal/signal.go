@@ -3,12 +3,14 @@ package signal
 import (
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
 	"sync"
+	"time"
 )
 
 const (
@@ -92,10 +94,12 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		t.cancelFuncLock.Unlock()
 
 		if in.Reset {
+			log.Info().Msg("signal component: reset requested, blocking until context done")
 			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
 
 			// so signal controller do not try bomb us all the time we stay put
 			<-ctx.Done()
+			log.Info().Interface("ctxErr", ctx.Err()).Msg("signal component: context done after reset")
 			// we block signal
 			return ctx.Err()
 		}
@@ -107,8 +111,20 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		//
 		_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
 
+		log.Info().
+			Interface("ctxErrBefore", ctx.Err()).
+			Msg("signal component: calling OutPort handler")
+
+		outStart := time.Now()
 		// we blocked by requested resource
-		_ = handler(ctx, OutPort, in.Context)
+		outResult := handler(ctx, OutPort, in.Context)
+		outDuration := time.Since(outStart)
+
+		log.Info().
+			Dur("duration", outDuration).
+			Interface("ctxErrAfter", ctx.Err()).
+			Interface("result", outResult).
+			Msg("signal component: OutPort handler returned")
 
 		return ctx.Err()
 
