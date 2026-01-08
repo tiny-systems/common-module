@@ -151,6 +151,13 @@ func (t *Component) Ports() []module.Port {
 	t.cancelFuncLock.Lock()
 	defer t.cancelFuncLock.Unlock()
 
+	resetEnable := t.cancelFunc != nil
+
+	log.Info().
+		Bool("cancelFuncIsNil", t.cancelFunc == nil).
+		Bool("resetEnable", resetEnable).
+		Msg("signal component: Ports() called")
+
 	return []module.Port{
 		{
 			Name:          v1alpha1.SettingsPort,
@@ -170,7 +177,7 @@ func (t *Component) Ports() []module.Port {
 			Source: true,
 			Configuration: Control{
 				Context:     t.getControlContext(),
-				ResetEnable: t.cancelFunc != nil,
+				ResetEnable: resetEnable,
 			},
 		},
 	}
