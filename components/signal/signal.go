@@ -85,11 +85,9 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		// when multiple signals arrive concurrently
 		t.handleLock.Lock()
 
-		if in.Reset {
-			t.controlContext = nil
-		} else {
-			t.controlContext = in.Context
-		}
+		// Always preserve context data (don't clear on reset)
+		// This allows Reset to cancel the operation while keeping data for next Send
+		t.controlContext = in.Context
 
 		t.cancelFuncLock.Lock()
 		if t.cancelFunc != nil {
