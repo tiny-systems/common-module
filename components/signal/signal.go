@@ -29,6 +29,7 @@ type Component struct {
 	controlContext Context // Store control context separately from settings
 	cancelFuncLock *sync.Mutex
 	cancelFunc     context.CancelFunc
+	handleLock     *sync.Mutex // Serialize control port handling to prevent races
 }
 
 type Control struct {
@@ -51,6 +52,7 @@ func (c Control) PrepareJSONSchema(schema *jsonschema.Schema) error {
 func (t *Component) Instance() module.Component {
 	return &Component{
 		cancelFuncLock: &sync.Mutex{},
+		handleLock:     &sync.Mutex{},
 		settings:       Settings{},
 	}
 }
@@ -79,6 +81,10 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			return fmt.Errorf("invalid input msg")
 		}
 
+		// Serialize control port handling to prevent race conditions
+		// when multiple signals arrive concurrently
+		t.handleLock.Lock()
+
 		if in.Reset {
 			t.controlContext = nil
 		} else {
@@ -86,7 +92,6 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		}
 
 		t.cancelFuncLock.Lock()
-
 		if t.cancelFunc != nil {
 			t.cancelFunc()
 			t.cancelFunc = nil
@@ -94,9 +99,11 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		t.cancelFuncLock.Unlock()
 
 		if in.Reset {
-			log.Info().Msg("signal component: reset requested, blocking until context done")
+			log.Info().Msg("signal component: reset requested, triggering reconcile")
 			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+			t.handleLock.Unlock()
 
+			log.Info().Msg("signal component: reset blocking until context done")
 			// so signal controller do not try bomb us all the time we stay put
 			<-ctx.Done()
 			log.Info().Interface("ctxErr", ctx.Err()).Msg("signal component: context done after reset")
@@ -108,8 +115,8 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		ctx, t.cancelFunc = context.WithCancel(ctx)
 		t.cancelFuncLock.Unlock()
 
-		//
 		_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+		t.handleLock.Unlock()
 
 		log.Info().
 			Interface("ctxErrBefore", ctx.Err()).
