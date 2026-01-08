@@ -16,6 +16,7 @@ import (
 const (
 	ComponentName        = "signal"
 	OutPort       string = "out"
+	RunningMetadata      = "signal-running"
 )
 
 type Context any
@@ -30,6 +31,7 @@ type Component struct {
 	cancelFuncLock *sync.Mutex
 	cancelFunc     context.CancelFunc
 	handleLock     *sync.Mutex // Serialize control port handling to prevent races
+	isRunning      bool        // Synced from metadata for all pods
 }
 
 type Control struct {
@@ -97,8 +99,15 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		t.cancelFuncLock.Unlock()
 
 		if in.Reset {
-			log.Info().Msg("signal component: reset requested, triggering reconcile")
-			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+			log.Info().Msg("signal component: reset requested, updating metadata")
+			// Update metadata to indicate not running
+			_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+				if n.Status.Metadata == nil {
+					n.Status.Metadata = map[string]string{}
+				}
+				n.Status.Metadata[RunningMetadata] = "false"
+				return nil
+			})
 			t.handleLock.Unlock()
 
 			log.Info().Msg("signal component: reset blocking until context done")
@@ -113,7 +122,14 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		ctx, t.cancelFunc = context.WithCancel(ctx)
 		t.cancelFuncLock.Unlock()
 
-		_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+		// Update metadata to indicate running
+		_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+			if n.Status.Metadata == nil {
+				n.Status.Metadata = map[string]string{}
+			}
+			n.Status.Metadata[RunningMetadata] = "true"
+			return nil
+		})
 		t.handleLock.Unlock()
 
 		log.Info().
@@ -140,6 +156,12 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		}
 		t.settings = in
 
+	case v1alpha1.ReconcilePort:
+		// Sync running state from metadata for all pods
+		if node, ok := msg.(v1alpha1.TinyNode); ok {
+			t.isRunning = node.Status.Metadata[RunningMetadata] == "true"
+			log.Info().Bool("isRunning", t.isRunning).Msg("signal component: synced running state from metadata")
+		}
 	}
 	return nil
 }
@@ -149,9 +171,12 @@ func (t *Component) Ports() []module.Port {
 	t.cancelFuncLock.Lock()
 	defer t.cancelFuncLock.Unlock()
 
-	resetEnable := t.cancelFunc != nil
+	// Use isRunning from metadata (synced across all pods) as primary source
+	// Fall back to cancelFunc for the leader pod that hasn't synced yet
+	resetEnable := t.isRunning || t.cancelFunc != nil
 
 	log.Info().
+		Bool("isRunning", t.isRunning).
 		Bool("cancelFuncIsNil", t.cancelFunc == nil).
 		Bool("resetEnable", resetEnable).
 		Msg("signal component: Ports() called")
