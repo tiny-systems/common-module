@@ -87,8 +87,11 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 
 		// Non-leaders block to avoid requeue spam
 		if !utils.IsLeader(ctx) {
-			atomic.AddInt32(&t.blocking, 1)
-			defer atomic.AddInt32(&t.blocking, -1)
+			// Only count as blocking if Send (flow running), not Reset
+			if in.Send {
+				atomic.AddInt32(&t.blocking, 1)
+				defer atomic.AddInt32(&t.blocking, -1)
+			}
 			<-ctx.Done()
 			return ctx.Err()
 		}
@@ -107,9 +110,8 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			log.Info().Msg("signal component: reset requested")
 			t.handleLock.Unlock()
 
-			atomic.AddInt32(&t.blocking, 1)
-			defer atomic.AddInt32(&t.blocking, -1)
-
+			// Don't increment blocking - Reset means NOT running
+			// Just block to avoid controller requeue spam
 			log.Info().Msg("signal component: reset blocking until context done")
 			<-ctx.Done()
 			log.Info().Interface("ctxErr", ctx.Err()).Msg("signal component: context done after reset")
