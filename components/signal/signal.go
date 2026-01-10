@@ -16,7 +16,6 @@ import (
 const (
 	ComponentName        = "signal"
 	OutPort       string = "out"
-	RunningMetadata      = "signal-running" // Metadata key for running state
 )
 
 type Context any
@@ -31,7 +30,7 @@ type Component struct {
 	cancelFuncLock *sync.Mutex
 	cancelFunc     context.CancelFunc
 	handleLock     *sync.Mutex // Serialize control port handling to prevent races
-	isRunning      bool        // Tracks running state for UI (all pods)
+	isRunning      bool        // Tracks running state for UI
 	isRunningLock  *sync.Mutex
 }
 
@@ -85,51 +84,27 @@ func (t *Component) getIsRunning() bool {
 func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
 
 	switch port {
-	case v1alpha1.ReconcilePort:
-		// All pods receive ReconcilePort - sync running state from metadata
-		if node, ok := msg.(v1alpha1.TinyNode); ok {
-			if node.Status.Metadata != nil {
-				t.setIsRunning(node.Status.Metadata[RunningMetadata] == "true")
-			}
-		}
-		return nil
-
 	case v1alpha1.ControlPort:
 		in, ok := msg.(Control)
 		if !ok {
 			return fmt.Errorf("invalid input msg")
 		}
 
-		// ALL pods update context for UI display
+		// ALL pods update context and running state
 		t.controlContext = in.Context
+		if in.Send {
+			t.setIsRunning(true)
+		} else if in.Reset {
+			t.setIsRunning(false)
+		}
 
+		// Non-leaders block to avoid requeue spam
 		if !utils.IsLeader(ctx) {
-			// only leader executes the flow and updates metadata
-			return nil
+			<-ctx.Done()
+			return ctx.Err()
 		}
 
-		// Leader updates running state in metadata so all pods sync via ReconcilePort
-		if in.Send || in.Reset {
-			newRunning := in.Send
-			t.setIsRunning(newRunning)
-			log.Info().Bool("newRunning", newRunning).Msg("signal component: updating metadata")
-			result := handler(ctx, v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
-				if n.Status.Metadata == nil {
-					n.Status.Metadata = map[string]string{}
-				}
-				if newRunning {
-					n.Status.Metadata[RunningMetadata] = "true"
-				} else {
-					n.Status.Metadata[RunningMetadata] = "false"
-				}
-				log.Info().Bool("newRunning", newRunning).Str("metadata", n.Status.Metadata[RunningMetadata]).Msg("signal component: metadata update callback executed")
-				return nil
-			})
-			log.Info().Interface("result", result).Msg("signal component: metadata update result")
-		}
-
-		// Serialize control port handling to prevent race conditions
-		// when multiple signals arrive concurrently
+		// Leader: serialize control port handling
 		t.handleLock.Lock()
 
 		t.cancelFuncLock.Lock()
@@ -144,10 +119,8 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			t.handleLock.Unlock()
 
 			log.Info().Msg("signal component: reset blocking until context done")
-			// so signal controller do not try bomb us all the time we stay put
 			<-ctx.Done()
 			log.Info().Interface("ctxErr", ctx.Err()).Msg("signal component: context done after reset")
-			// we block signal
 			return ctx.Err()
 		}
 
@@ -162,7 +135,6 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			Msg("signal component: calling OutPort handler")
 
 		outStart := time.Now()
-		// we blocked by requested resource
 		outResult := handler(ctx, OutPort, in.Context)
 		outDuration := time.Since(outStart)
 
@@ -185,13 +157,9 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 }
 
 func (t *Component) Ports() []module.Port {
-	// Use isRunning flag which is synced from metadata via ReconcilePort
 	resetEnable := t.getIsRunning()
 
 	return []module.Port{
-		{
-			Name: v1alpha1.ReconcilePort, // Receive TinyNode updates to sync running state
-		},
 		{
 			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
