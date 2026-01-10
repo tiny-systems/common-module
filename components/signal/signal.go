@@ -112,7 +112,8 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		if in.Send || in.Reset {
 			newRunning := in.Send
 			t.setIsRunning(newRunning)
-			_ = handler(ctx, v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+			log.Info().Bool("newRunning", newRunning).Msg("signal component: updating metadata")
+			result := handler(ctx, v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 				if n.Status.Metadata == nil {
 					n.Status.Metadata = map[string]string{}
 				}
@@ -121,8 +122,10 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 				} else {
 					n.Status.Metadata[RunningMetadata] = "false"
 				}
+				log.Info().Bool("newRunning", newRunning).Str("metadata", n.Status.Metadata[RunningMetadata]).Msg("signal component: metadata update callback executed")
 				return nil
 			})
+			log.Info().Interface("result", result).Msg("signal component: metadata update result")
 		}
 
 		// Serialize control port handling to prevent race conditions
