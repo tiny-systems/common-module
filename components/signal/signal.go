@@ -2,7 +2,6 @@ package signal
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/rs/zerolog/log"
 	"github.com/swaggest/jsonschema-go"
@@ -17,8 +16,6 @@ import (
 const (
 	ComponentName        = "signal"
 	OutPort       string = "out"
-	RunningMetadata      = "signal-running"
-	ContextMetadata      = "signal-context"
 )
 
 type Context any
@@ -33,7 +30,6 @@ type Component struct {
 	cancelFuncLock *sync.Mutex
 	cancelFunc     context.CancelFunc
 	handleLock     *sync.Mutex // Serialize control port handling to prevent races
-	isRunning      bool        // Synced from metadata for all pods
 }
 
 type Control struct {
@@ -101,15 +97,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		t.cancelFuncLock.Unlock()
 
 		if in.Reset {
-			log.Info().Msg("signal component: reset requested, updating metadata")
-			// Update metadata to indicate not running
-			_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
-				if n.Status.Metadata == nil {
-					n.Status.Metadata = map[string]string{}
-				}
-				n.Status.Metadata[RunningMetadata] = "false"
-				return nil
-			})
+			log.Info().Msg("signal component: reset requested")
 			t.handleLock.Unlock()
 
 			log.Info().Msg("signal component: reset blocking until context done")
@@ -124,18 +112,6 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		ctx, t.cancelFunc = context.WithCancel(ctx)
 		t.cancelFuncLock.Unlock()
 
-		// Update metadata to indicate running and store context for recovery
-		_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
-			if n.Status.Metadata == nil {
-				n.Status.Metadata = map[string]string{}
-			}
-			n.Status.Metadata[RunningMetadata] = "true"
-			// Store context for auto-recovery after pod restart
-			if contextData, err := json.Marshal(in.Context); err == nil {
-				n.Status.Metadata[ContextMetadata] = string(contextData)
-			}
-			return nil
-		})
 		t.handleLock.Unlock()
 
 		log.Info().
@@ -161,38 +137,6 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			return fmt.Errorf("invalid settings")
 		}
 		t.settings = in
-
-	case v1alpha1.ReconcilePort:
-		node, ok := msg.(v1alpha1.TinyNode)
-		if !ok {
-			return nil
-		}
-
-		shouldBeRunning := node.Status.Metadata[RunningMetadata] == "true"
-		t.isRunning = shouldBeRunning
-
-		// Restore context from metadata
-		if ctxData := node.Status.Metadata[ContextMetadata]; ctxData != "" {
-			var savedCtx Context
-			if json.Unmarshal([]byte(ctxData), &savedCtx) == nil {
-				t.controlContext = savedCtx
-			}
-		}
-
-		t.cancelFuncLock.Lock()
-		isActuallyRunning := t.cancelFunc != nil
-		t.cancelFuncLock.Unlock()
-
-		// Auto-recover: if should be running but isn't, and we're leader
-		if shouldBeRunning && !isActuallyRunning && utils.IsLeader(ctx) {
-			log.Info().Msg("signal: auto-recovering")
-			ctx, cancel := context.WithCancel(context.Background())
-			t.cancelFuncLock.Lock()
-			t.cancelFunc = cancel
-			t.cancelFuncLock.Unlock()
-
-			go handler(ctx, OutPort, t.getControlContext())
-		}
 	}
 	return nil
 }
@@ -200,22 +144,10 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 func (t *Component) Ports() []module.Port {
 
 	t.cancelFuncLock.Lock()
-	defer t.cancelFuncLock.Unlock()
-
-	// Use isRunning from metadata (synced across all pods) as primary source
-	// Fall back to cancelFunc for the leader pod that hasn't synced yet
-	resetEnable := t.isRunning || t.cancelFunc != nil
-
-	log.Info().
-		Bool("isRunning", t.isRunning).
-		Bool("cancelFuncIsNil", t.cancelFunc == nil).
-		Bool("resetEnable", resetEnable).
-		Msg("signal component: Ports() called")
+	resetEnable := t.cancelFunc != nil
+	t.cancelFuncLock.Unlock()
 
 	return []module.Port{
-		{
-			Name: v1alpha1.ReconcilePort, // to receive TinyNode for metadata sync
-		},
 		{
 			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
