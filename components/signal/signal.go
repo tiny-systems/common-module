@@ -70,24 +70,22 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 
 	switch port {
 	case v1alpha1.ControlPort:
-
-		if !utils.IsLeader(ctx) {
-			// only leader propagates request further to avoid x (amount of replicas) multiply
-			return nil
-		}
-
 		in, ok := msg.(Control)
 		if !ok {
 			return fmt.Errorf("invalid input msg")
 		}
 
+		// ALL pods update context for UI display
+		t.controlContext = in.Context
+
+		if !utils.IsLeader(ctx) {
+			// only leader executes the flow
+			return nil
+		}
+
 		// Serialize control port handling to prevent race conditions
 		// when multiple signals arrive concurrently
 		t.handleLock.Lock()
-
-		// Always preserve context data (don't clear on reset)
-		// This allows Reset to cancel the operation while keeping data for next Send
-		t.controlContext = in.Context
 
 		t.cancelFuncLock.Lock()
 		if t.cancelFunc != nil {
