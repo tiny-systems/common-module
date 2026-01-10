@@ -2,6 +2,7 @@ package signal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/rs/zerolog/log"
 	"github.com/swaggest/jsonschema-go"
@@ -17,6 +18,7 @@ const (
 	ComponentName        = "signal"
 	OutPort       string = "out"
 	RunningMetadata      = "signal-running"
+	ContextMetadata      = "signal-context"
 )
 
 type Context any
@@ -122,12 +124,16 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		ctx, t.cancelFunc = context.WithCancel(ctx)
 		t.cancelFuncLock.Unlock()
 
-		// Update metadata to indicate running
+		// Update metadata to indicate running and store context for recovery
 		_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 			if n.Status.Metadata == nil {
 				n.Status.Metadata = map[string]string{}
 			}
 			n.Status.Metadata[RunningMetadata] = "true"
+			// Store context for auto-recovery after pod restart
+			if contextData, err := json.Marshal(in.Context); err == nil {
+				n.Status.Metadata[ContextMetadata] = string(contextData)
+			}
 			return nil
 		})
 		t.handleLock.Unlock()
@@ -157,10 +163,35 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		t.settings = in
 
 	case v1alpha1.ReconcilePort:
-		// Sync running state from metadata for all pods
-		if node, ok := msg.(v1alpha1.TinyNode); ok {
-			t.isRunning = node.Status.Metadata[RunningMetadata] == "true"
-			log.Info().Bool("isRunning", t.isRunning).Msg("signal component: synced running state from metadata")
+		node, ok := msg.(v1alpha1.TinyNode)
+		if !ok {
+			return nil
+		}
+
+		shouldBeRunning := node.Status.Metadata[RunningMetadata] == "true"
+		t.isRunning = shouldBeRunning
+
+		// Restore context from metadata
+		if ctxData := node.Status.Metadata[ContextMetadata]; ctxData != "" {
+			var savedCtx Context
+			if json.Unmarshal([]byte(ctxData), &savedCtx) == nil {
+				t.controlContext = savedCtx
+			}
+		}
+
+		t.cancelFuncLock.Lock()
+		isActuallyRunning := t.cancelFunc != nil
+		t.cancelFuncLock.Unlock()
+
+		// Auto-recover: if should be running but isn't, and we're leader
+		if shouldBeRunning && !isActuallyRunning && utils.IsLeader(ctx) {
+			log.Info().Msg("signal: auto-recovering")
+			ctx, cancel := context.WithCancel(context.Background())
+			t.cancelFuncLock.Lock()
+			t.cancelFunc = cancel
+			t.cancelFuncLock.Unlock()
+
+			go handler(ctx, OutPort, t.getControlContext())
 		}
 	}
 	return nil
