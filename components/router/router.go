@@ -3,13 +3,13 @@ package router
 import (
 	"context"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
+	"strings"
+
 	"github.com/goccy/go-json"
 	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/registry"
-	"strings"
 )
 
 const (
