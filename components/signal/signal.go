@@ -16,6 +16,7 @@ import (
 const (
 	ComponentName        = "signal"
 	OutPort       string = "out"
+	RunningMetadata      = "signal-running" // Metadata key for running state
 )
 
 type Context any
@@ -84,23 +85,44 @@ func (t *Component) getIsRunning() bool {
 func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
 
 	switch port {
+	case v1alpha1.ReconcilePort:
+		// All pods receive ReconcilePort - sync running state from metadata
+		if node, ok := msg.(v1alpha1.TinyNode); ok {
+			if node.Status.Metadata != nil {
+				t.setIsRunning(node.Status.Metadata[RunningMetadata] == "true")
+			}
+		}
+		return nil
+
 	case v1alpha1.ControlPort:
 		in, ok := msg.(Control)
 		if !ok {
 			return fmt.Errorf("invalid input msg")
 		}
 
-		// ALL pods update context and running state for UI display
+		// ALL pods update context for UI display
 		t.controlContext = in.Context
-		if in.Send {
-			t.setIsRunning(true)
-		} else if in.Reset {
-			t.setIsRunning(false)
-		}
 
 		if !utils.IsLeader(ctx) {
-			// only leader executes the flow
+			// only leader executes the flow and updates metadata
 			return nil
+		}
+
+		// Leader updates running state in metadata so all pods sync via ReconcilePort
+		if in.Send || in.Reset {
+			newRunning := in.Send
+			t.setIsRunning(newRunning)
+			_ = handler(ctx, v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+				if n.Status.Metadata == nil {
+					n.Status.Metadata = map[string]string{}
+				}
+				if newRunning {
+					n.Status.Metadata[RunningMetadata] = "true"
+				} else {
+					n.Status.Metadata[RunningMetadata] = "false"
+				}
+				return nil
+			})
 		}
 
 		// Serialize control port handling to prevent race conditions
@@ -160,10 +182,13 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 }
 
 func (t *Component) Ports() []module.Port {
-	// Use isRunning flag which is updated by ALL pods
+	// Use isRunning flag which is synced from metadata via ReconcilePort
 	resetEnable := t.getIsRunning()
 
 	return []module.Port{
+		{
+			Name: v1alpha1.ReconcilePort, // Receive TinyNode updates to sync running state
+		},
 		{
 			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
