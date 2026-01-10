@@ -103,8 +103,6 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		return fmt.Errorf("invalid message")
 	}
 
-	spew.Dump(in.Conditions)
-
 	for _, condition := range in.Conditions {
 		if condition.Condition {
 			return handler(ctx, getPortNameFromRoute(condition.RouteName.Value), in.Context)
