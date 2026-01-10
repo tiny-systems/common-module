@@ -3,15 +3,15 @@ package signal
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/rs/zerolog/log"
 	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const (
@@ -31,7 +31,6 @@ type Component struct {
 	cancelFuncLock *sync.Mutex
 	cancelFunc     context.CancelFunc
 	handleLock     *sync.Mutex // Serialize control port handling to prevent races
-	blocking       int32       // Atomic counter: >0 means handler is blocking
 }
 
 type Control struct {
@@ -68,36 +67,28 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-// isBlocking returns true if any handler is currently blocking
-func (t *Component) isBlocking() bool {
-	return atomic.LoadInt32(&t.blocking) > 0
-}
-
 func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
 
 	switch port {
 	case v1alpha1.ControlPort:
+
+		if !utils.IsLeader(ctx) {
+			// only leader propagates request further to avoid x (amount of replicas) multiply
+			return nil
+		}
+
 		in, ok := msg.(Control)
 		if !ok {
 			return fmt.Errorf("invalid input msg")
 		}
 
-		// ALL pods update context
-		t.controlContext = in.Context
-
-		// Non-leaders block to avoid requeue spam
-		if !utils.IsLeader(ctx) {
-			// Only count as blocking if Send (flow running), not Reset
-			if in.Send {
-				atomic.AddInt32(&t.blocking, 1)
-				defer atomic.AddInt32(&t.blocking, -1)
-			}
-			<-ctx.Done()
-			return ctx.Err()
-		}
-
-		// Leader: serialize control port handling
+		// Serialize control port handling to prevent race conditions
+		// when multiple signals arrive concurrently
 		t.handleLock.Lock()
+
+		// Always preserve context data (don't clear on reset)
+		// This allows Reset to cancel the operation while keeping data for next Send
+		t.controlContext = in.Context
 
 		t.cancelFuncLock.Lock()
 		if t.cancelFunc != nil {
@@ -107,14 +98,15 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		t.cancelFuncLock.Unlock()
 
 		if in.Reset {
-			log.Info().Msg("signal component: reset requested")
+			log.Info().Msg("signal component: reset requested, triggering reconcile")
+			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
 			t.handleLock.Unlock()
 
-			// Don't increment blocking - Reset means NOT running
-			// Just block to avoid controller requeue spam
 			log.Info().Msg("signal component: reset blocking until context done")
+			// so signal controller do not try bomb us all the time we stay put
 			<-ctx.Done()
 			log.Info().Interface("ctxErr", ctx.Err()).Msg("signal component: context done after reset")
+			// we block signal
 			return ctx.Err()
 		}
 
@@ -122,16 +114,15 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		ctx, t.cancelFunc = context.WithCancel(ctx)
 		t.cancelFuncLock.Unlock()
 
+		_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
 		t.handleLock.Unlock()
-
-		atomic.AddInt32(&t.blocking, 1)
-		defer atomic.AddInt32(&t.blocking, -1)
 
 		log.Info().
 			Interface("ctxErrBefore", ctx.Err()).
 			Msg("signal component: calling OutPort handler")
 
 		outStart := time.Now()
+		// we blocked by requested resource
 		outResult := handler(ctx, OutPort, in.Context)
 		outDuration := time.Since(outStart)
 
@@ -149,13 +140,22 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			return fmt.Errorf("invalid settings")
 		}
 		t.settings = in
+
 	}
 	return nil
 }
 
 func (t *Component) Ports() []module.Port {
-	// Real check: is any handler currently blocking?
-	resetEnable := t.isBlocking()
+
+	t.cancelFuncLock.Lock()
+	defer t.cancelFuncLock.Unlock()
+
+	resetEnable := t.cancelFunc != nil
+
+	log.Info().
+		Bool("cancelFuncIsNil", t.cancelFunc == nil).
+		Bool("resetEnable", resetEnable).
+		Msg("signal component: Ports() called")
 
 	return []module.Port{
 		{
