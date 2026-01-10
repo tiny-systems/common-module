@@ -10,6 +10,7 @@ import (
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,8 +31,7 @@ type Component struct {
 	cancelFuncLock *sync.Mutex
 	cancelFunc     context.CancelFunc
 	handleLock     *sync.Mutex // Serialize control port handling to prevent races
-	isRunning      bool        // Tracks running state for UI
-	isRunningLock  *sync.Mutex
+	blocking       int32       // Atomic counter: >0 means handler is blocking
 }
 
 type Control struct {
@@ -55,7 +55,6 @@ func (t *Component) Instance() module.Component {
 	return &Component{
 		cancelFuncLock: &sync.Mutex{},
 		handleLock:     &sync.Mutex{},
-		isRunningLock:  &sync.Mutex{},
 		settings:       Settings{},
 	}
 }
@@ -69,16 +68,9 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) setIsRunning(v bool) {
-	t.isRunningLock.Lock()
-	defer t.isRunningLock.Unlock()
-	t.isRunning = v
-}
-
-func (t *Component) getIsRunning() bool {
-	t.isRunningLock.Lock()
-	defer t.isRunningLock.Unlock()
-	return t.isRunning
+// isBlocking returns true if any handler is currently blocking
+func (t *Component) isBlocking() bool {
+	return atomic.LoadInt32(&t.blocking) > 0
 }
 
 func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
@@ -90,16 +82,13 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			return fmt.Errorf("invalid input msg")
 		}
 
-		// ALL pods update context and running state
+		// ALL pods update context
 		t.controlContext = in.Context
-		if in.Send {
-			t.setIsRunning(true)
-		} else if in.Reset {
-			t.setIsRunning(false)
-		}
 
 		// Non-leaders block to avoid requeue spam
 		if !utils.IsLeader(ctx) {
+			atomic.AddInt32(&t.blocking, 1)
+			defer atomic.AddInt32(&t.blocking, -1)
 			<-ctx.Done()
 			return ctx.Err()
 		}
@@ -118,6 +107,9 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			log.Info().Msg("signal component: reset requested")
 			t.handleLock.Unlock()
 
+			atomic.AddInt32(&t.blocking, 1)
+			defer atomic.AddInt32(&t.blocking, -1)
+
 			log.Info().Msg("signal component: reset blocking until context done")
 			<-ctx.Done()
 			log.Info().Interface("ctxErr", ctx.Err()).Msg("signal component: context done after reset")
@@ -129,6 +121,9 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		t.cancelFuncLock.Unlock()
 
 		t.handleLock.Unlock()
+
+		atomic.AddInt32(&t.blocking, 1)
+		defer atomic.AddInt32(&t.blocking, -1)
 
 		log.Info().
 			Interface("ctxErrBefore", ctx.Err()).
@@ -157,7 +152,8 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 }
 
 func (t *Component) Ports() []module.Port {
-	resetEnable := t.getIsRunning()
+	// Real check: is any handler currently blocking?
+	resetEnable := t.isBlocking()
 
 	return []module.Port{
 		{
