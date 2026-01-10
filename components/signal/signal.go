@@ -30,6 +30,8 @@ type Component struct {
 	cancelFuncLock *sync.Mutex
 	cancelFunc     context.CancelFunc
 	handleLock     *sync.Mutex // Serialize control port handling to prevent races
+	isRunning      bool        // Tracks running state for UI (all pods)
+	isRunningLock  *sync.Mutex
 }
 
 type Control struct {
@@ -53,6 +55,7 @@ func (t *Component) Instance() module.Component {
 	return &Component{
 		cancelFuncLock: &sync.Mutex{},
 		handleLock:     &sync.Mutex{},
+		isRunningLock:  &sync.Mutex{},
 		settings:       Settings{},
 	}
 }
@@ -66,6 +69,18 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
+func (t *Component) setIsRunning(v bool) {
+	t.isRunningLock.Lock()
+	defer t.isRunningLock.Unlock()
+	t.isRunning = v
+}
+
+func (t *Component) getIsRunning() bool {
+	t.isRunningLock.Lock()
+	defer t.isRunningLock.Unlock()
+	return t.isRunning
+}
+
 func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
 
 	switch port {
@@ -75,8 +90,13 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			return fmt.Errorf("invalid input msg")
 		}
 
-		// ALL pods update context for UI display
+		// ALL pods update context and running state for UI display
 		t.controlContext = in.Context
+		if in.Send {
+			t.setIsRunning(true)
+		} else if in.Reset {
+			t.setIsRunning(false)
+		}
 
 		if !utils.IsLeader(ctx) {
 			// only leader executes the flow
@@ -140,10 +160,8 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 }
 
 func (t *Component) Ports() []module.Port {
-
-	t.cancelFuncLock.Lock()
-	resetEnable := t.cancelFunc != nil
-	t.cancelFuncLock.Unlock()
+	// Use isRunning flag which is updated by ALL pods
+	resetEnable := t.getIsRunning()
 
 	return []module.Port{
 		{
