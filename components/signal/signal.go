@@ -183,6 +183,9 @@ func (t *Component) Ports() []module.Port {
 
 	return []module.Port{
 		{
+			Name: v1alpha1.ReconcilePort, // to receive TinyNode for metadata sync
+		},
+		{
 			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
 			Configuration: t.settings,
