@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	_ "github.com/tiny-systems/common-module/components/async"
+	_ "github.com/tiny-systems/common-module/components/cron"
 	_ "github.com/tiny-systems/common-module/components/debug"
 	_ "github.com/tiny-systems/common-module/components/delay"
 	_ "github.com/tiny-systems/common-module/components/modify"
