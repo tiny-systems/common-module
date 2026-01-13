@@ -167,6 +167,8 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 		c.nextTick = sched.Next(time.Now())
 		c.mu.Unlock()
 
+		handler(context.Background(), v1alpha1.ReconcilePort, nil)
+
 		log.Debug().Time("nextTick", c.nextTick).Msg("cron: scheduled next tick")
 	}
 }
