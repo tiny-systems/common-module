@@ -1,4 +1,4 @@
-name: Build & publish module to the Tiny Systems
+name: Build & publish module to the TinySystems
 
 on:
   push:
