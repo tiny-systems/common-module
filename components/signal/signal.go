@@ -32,6 +32,9 @@ type Component struct {
 
 	// Running state (local tracking for UI)
 	isRunning bool
+
+	// Store the context that was sent (for display in Reset mode)
+	sentContext Context
 }
 
 type Control struct {
@@ -108,6 +111,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			// Reset doesn't need to do anything special now
 			// The blocking edge will be cancelled by context when the TinySignal is deleted
 			t.isRunning = false
+			t.sentContext = nil // Clear sent context
 
 			// Trigger reconcile to update UI
 			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
@@ -119,6 +123,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			log.Info().Msg("signal component: send requested, calling OutPort")
 
 			t.isRunning = true
+			t.sentContext = in.Context // Store context for display in Reset mode
 
 			// Trigger reconcile to update UI
 			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
@@ -158,8 +163,11 @@ func (t *Component) Ports() []module.Port {
 		Bool("isRunning", t.isRunning).
 		Msg("signal component: Ports() called")
 
-	// Get context from settings
+	// Use sent context when running, settings context when not
 	controlContext := t.settings.Context
+	if t.isRunning && t.sentContext != nil {
+		controlContext = t.sentContext
+	}
 
 	return []module.Port{
 		{
