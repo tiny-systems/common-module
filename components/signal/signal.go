@@ -4,12 +4,18 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
 	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
+)
+
+const (
+	metadataKeyRunning = "signal-running"
+	metadataKeyContext = "signal-context"
 )
 
 const (
@@ -75,9 +81,22 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 
 	switch port {
 	case v1alpha1.ReconcilePort:
-		// Receive TinyNode for node name
+		// Receive TinyNode for node name and restore state from metadata
 		if node, ok := msg.(v1alpha1.TinyNode); ok {
 			t.nodeName = node.Name
+
+			// Restore running state from metadata (survives pod restarts)
+			if node.Status.Metadata != nil {
+				if _, ok := node.Status.Metadata[metadataKeyRunning]; ok {
+					t.isRunning = true
+				}
+				if ctxStr, ok := node.Status.Metadata[metadataKeyContext]; ok && ctxStr != "" {
+					var ctx Context
+					if err := json.Unmarshal([]byte(ctxStr), &ctx); err == nil {
+						t.sentContext = ctx
+					}
+				}
+			}
 		}
 		return nil
 
@@ -113,8 +132,14 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			t.isRunning = false
 			t.sentContext = nil // Clear sent context
 
-			// Trigger reconcile to update UI
-			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+			// Clear metadata (survives pod restarts)
+			_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+				if n.Status.Metadata != nil {
+					delete(n.Status.Metadata, metadataKeyRunning)
+					delete(n.Status.Metadata, metadataKeyContext)
+				}
+				return nil
+			})
 
 			return nil
 		}
@@ -125,8 +150,16 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			t.isRunning = true
 			t.sentContext = in.Context // Store context for display in Reset mode
 
-			// Trigger reconcile to update UI
-			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+			// Persist state to metadata (survives pod restarts)
+			ctxBytes, _ := json.Marshal(in.Context)
+			_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+				if n.Status.Metadata == nil {
+					n.Status.Metadata = make(map[string]string)
+				}
+				n.Status.Metadata[metadataKeyRunning] = "true"
+				n.Status.Metadata[metadataKeyContext] = string(ctxBytes)
+				return nil
+			})
 
 			// Call the blocking OutPort - this will create a TinyState for the destination
 			// and block until the destination component completes or the TinyState is deleted
@@ -138,9 +171,16 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 				Msg("signal component: OutPort returned, send complete")
 
 			t.isRunning = false
+			t.sentContext = nil
 
-			// Trigger reconcile to update UI
-			_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+			// Clear metadata (blocking completed)
+			_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+				if n.Status.Metadata != nil {
+					delete(n.Status.Metadata, metadataKeyRunning)
+					delete(n.Status.Metadata, metadataKeyContext)
+				}
+				return nil
+			})
 
 			return nil
 		}
