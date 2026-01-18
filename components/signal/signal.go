@@ -280,6 +280,13 @@ func (t *Component) writeState(handler module.Handler, state State) error {
 		return err
 	}
 
+	// Update local state immediately (optimistic update)
+	// This ensures UI shows correct status before K8s round-trip completes
+	t.stateLock.Lock()
+	t.state = state
+	t.isRunning = true
+	t.stateLock.Unlock()
+
 	// Use ReconcilePort with a state update function
 	// The scheduler will create/update TinyState for this node
 	result := handler(context.Background(), v1alpha1.ReconcilePort, v1alpha1.StateUpdate{
@@ -291,6 +298,13 @@ func (t *Component) writeState(handler module.Handler, state State) error {
 
 // deleteState deletes the TinyState CRD (nil Data signals deletion)
 func (t *Component) deleteState(handler module.Handler) error {
+	// Update local state immediately (optimistic update)
+	// This ensures UI shows correct status before K8s round-trip completes
+	t.stateLock.Lock()
+	t.state = State{}
+	t.isRunning = false
+	t.stateLock.Unlock()
+
 	result := handler(context.Background(), v1alpha1.ReconcilePort, v1alpha1.StateUpdate{
 		Data: nil,
 	})
