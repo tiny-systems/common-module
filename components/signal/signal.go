@@ -79,6 +79,12 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		return nil
 
 	case v1alpha1.ControlPort:
+		log.Info().
+			Bool("isLeader", utils.IsLeader(ctx)).
+			Interface("msg", msg).
+			Str("msgType", fmt.Sprintf("%T", msg)).
+			Msg("signal component: ControlPort received")
+
 		// Only leader processes control commands
 		if !utils.IsLeader(ctx) {
 			return nil
@@ -86,8 +92,16 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 
 		in, ok := msg.(Control)
 		if !ok {
-			return fmt.Errorf("invalid input msg")
+			log.Error().
+				Str("msgType", fmt.Sprintf("%T", msg)).
+				Msg("signal component: type assertion failed")
+			return fmt.Errorf("invalid input msg: expected Control, got %T", msg)
 		}
+
+		log.Info().
+			Bool("send", in.Send).
+			Bool("reset", in.Reset).
+			Msg("signal component: Control parsed")
 
 		if in.Reset {
 			log.Info().Msg("signal component: reset requested")
