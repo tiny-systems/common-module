@@ -160,7 +160,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			t.sentContext = in.Context // Store context for display in Reset mode
 
 			// Create cancellable context for Reset to use
-			sendCtx, cancel := context.WithCancel(ctx)
+			sendCtx, cancel := context.WithCancel(context.Background())
 			t.cancelFunc = cancel
 
 			// Persist state to metadata (survives pod restarts)
@@ -174,27 +174,31 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 				return nil
 			})
 
-			// Call the blocking OutPort - this will create a TinyState for the destination
-			// and block until the destination component completes or the TinyState is deleted
-			// The handler returns when the blocking edge completes
-			result := handler(sendCtx, OutPort, in.Context)
+			// Run blocking call in goroutine so Handle() returns immediately
+			// This allows Reset to be processed while Send is running
+			go func() {
+				result := handler(sendCtx, OutPort, in.Context)
 
-			log.Info().
-				Interface("result", result).
-				Msg("signal component: OutPort returned, send complete")
+				log.Info().
+					Interface("result", result).
+					Msg("signal component: OutPort returned, send complete")
 
-			t.isRunning = false
-			t.sentContext = nil
-			t.cancelFunc = nil
+				t.isRunning = false
+				t.sentContext = nil
+				t.cancelFunc = nil
 
-			// Clear metadata (blocking completed)
-			_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
-				if n.Status.Metadata != nil {
-					delete(n.Status.Metadata, metadataKeyRunning)
-					delete(n.Status.Metadata, metadataKeyContext)
-				}
-				return nil
-			})
+				// Clear metadata (blocking completed)
+				_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+					if n.Status.Metadata != nil {
+						delete(n.Status.Metadata, metadataKeyRunning)
+						delete(n.Status.Metadata, metadataKeyContext)
+					}
+					return nil
+				})
+
+				// Trigger reconcile to update UI
+				_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+			}()
 
 			return nil
 		}
