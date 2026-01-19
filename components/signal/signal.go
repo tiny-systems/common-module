@@ -88,15 +88,29 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		if node, ok := msg.(v1alpha1.TinyNode); ok {
 			t.nodeName = node.Name
 
-			// Restore running state from metadata (survives pod restarts)
+			// Restore context from metadata
 			if node.Status.Metadata != nil {
-				if _, ok := node.Status.Metadata[metadataKeyRunning]; ok {
-					t.isRunning = true
-				}
 				if ctxStr, ok := node.Status.Metadata[metadataKeyContext]; ok && ctxStr != "" {
 					var ctx Context
 					if err := json.Unmarshal([]byte(ctxStr), &ctx); err == nil {
 						t.sentContext = ctx
+					}
+				}
+
+				// Check for orphaned running state (metadata says running but no goroutine)
+				if _, hasRunning := node.Status.Metadata[metadataKeyRunning]; hasRunning {
+					if t.cancelFunc != nil {
+						// Goroutine is actually running
+						t.isRunning = true
+					} else if utils.IsLeader(ctx) {
+						// Orphaned state - pod restarted, clear metadata
+						log.Info().Msg("signal component: clearing orphaned running state")
+						_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+							if n.Status.Metadata != nil {
+								delete(n.Status.Metadata, metadataKeyRunning)
+							}
+							return nil
+						})
 					}
 				}
 			}
