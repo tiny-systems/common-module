@@ -139,13 +139,13 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			}
 
 			t.isRunning = false
-			t.sentContext = nil // Clear sent context
+			// Keep sentContext for UI display, just clear running state
 
-			// Clear metadata (survives pod restarts)
+			// Clear running flag but keep context (so it persists across restarts)
 			_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 				if n.Status.Metadata != nil {
 					delete(n.Status.Metadata, metadataKeyRunning)
-					delete(n.Status.Metadata, metadataKeyContext)
+					// Keep signal-context for next startup
 				}
 				return nil
 			})
@@ -184,14 +184,14 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 					Msg("signal component: OutPort returned, send complete")
 
 				t.isRunning = false
-				t.sentContext = nil
 				t.cancelFunc = nil
+				// Keep sentContext for UI display
 
-				// Clear metadata (blocking completed)
+				// Clear running flag but keep context (so it persists across restarts)
 				_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 					if n.Status.Metadata != nil {
 						delete(n.Status.Metadata, metadataKeyRunning)
-						delete(n.Status.Metadata, metadataKeyContext)
+						// Keep signal-context for next startup
 					}
 					return nil
 				})
@@ -221,9 +221,9 @@ func (t *Component) Ports() []module.Port {
 		Bool("isRunning", t.isRunning).
 		Msg("signal component: Ports() called")
 
-	// Use sent context when running, settings context when not
+	// Use sent context if available (persists across restarts), fall back to settings
 	controlContext := t.settings.Context
-	if t.isRunning && t.sentContext != nil {
+	if t.sentContext != nil {
 		controlContext = t.sentContext
 	}
 
