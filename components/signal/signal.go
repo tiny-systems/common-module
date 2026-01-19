@@ -131,6 +131,12 @@ func (t *Component) handleOrphanedRunningState(ctx context.Context, handler modu
 	}
 
 	// Resume the flow instead of clearing - pod restarted while running
+	if t.sentContext == nil {
+		log.Warn().Msg("signal component: cannot resume - no saved context, clearing orphaned state")
+		t.clearRunningMetadata(handler)
+		return
+	}
+
 	log.Info().Msg("signal component: resuming flow after pod restart")
 	t.resumeBlockingCall(handler)
 }
