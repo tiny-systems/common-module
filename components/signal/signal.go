@@ -243,6 +243,9 @@ func (t *Component) Ports() []module.Port {
 
 	return []module.Port{
 		{
+			Name: v1alpha1.ReconcilePort,
+		},
+		{
 			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
 			Configuration: t.settings,
