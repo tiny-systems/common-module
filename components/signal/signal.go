@@ -130,8 +130,18 @@ func (t *Component) handleOrphanedRunningState(ctx context.Context, handler modu
 		return
 	}
 
-	log.Info().Msg("signal component: clearing orphaned running state")
-	t.clearRunningMetadata(handler)
+	// Resume the flow instead of clearing - pod restarted while running
+	log.Info().Msg("signal component: resuming flow after pod restart")
+	t.resumeBlockingCall(handler)
+}
+
+func (t *Component) resumeBlockingCall(handler module.Handler) {
+	t.isRunning = true
+
+	sendCtx, cancel := context.WithCancel(context.Background())
+	t.cancelFunc = cancel
+
+	go t.runBlockingCall(handler, sendCtx, t.sentContext)
 }
 
 func (t *Component) handleControl(ctx context.Context, handler module.Handler, msg interface{}) error {
