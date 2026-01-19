@@ -41,6 +41,9 @@ type Component struct {
 
 	// Store the context that was sent (for display in Reset mode)
 	sentContext Context
+
+	// Cancel function for the blocking Send call
+	cancelFunc context.CancelFunc
 }
 
 type Control struct {
@@ -127,8 +130,14 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 
 		if in.Reset {
 			log.Info().Msg("signal component: reset requested")
-			// Reset doesn't need to do anything special now
-			// The blocking edge will be cancelled by context when the TinySignal is deleted
+
+			// Cancel the blocking Send call if running
+			if t.cancelFunc != nil {
+				log.Info().Msg("signal component: cancelling blocking call")
+				t.cancelFunc()
+				t.cancelFunc = nil
+			}
+
 			t.isRunning = false
 			t.sentContext = nil // Clear sent context
 
@@ -150,6 +159,10 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			t.isRunning = true
 			t.sentContext = in.Context // Store context for display in Reset mode
 
+			// Create cancellable context for Reset to use
+			sendCtx, cancel := context.WithCancel(ctx)
+			t.cancelFunc = cancel
+
 			// Persist state to metadata (survives pod restarts)
 			ctxBytes, _ := json.Marshal(in.Context)
 			_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
@@ -164,7 +177,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			// Call the blocking OutPort - this will create a TinyState for the destination
 			// and block until the destination component completes or the TinyState is deleted
 			// The handler returns when the blocking edge completes
-			result := handler(ctx, OutPort, in.Context)
+			result := handler(sendCtx, OutPort, in.Context)
 
 			log.Info().
 				Interface("result", result).
@@ -172,6 +185,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 
 			t.isRunning = false
 			t.sentContext = nil
+			t.cancelFunc = nil
 
 			// Clear metadata (blocking completed)
 			_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
