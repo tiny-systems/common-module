@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	ComponentName        = "split"
+	ComponentName        = "array_split"
 	OutPort       string = "out"
 	InPort        string = "in"
 )

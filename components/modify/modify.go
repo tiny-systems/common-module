@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	ComponentName        = "modify"
+	ComponentName        = "transform"
 	InPort        string = "in"
 	OutPort       string = "out"
 )
