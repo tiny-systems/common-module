@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog/log"
 	"github.com/swaggest/jsonschema-go"
@@ -19,6 +20,12 @@ import (
 const (
 	ComponentName = "cron"
 	OutPort       = "out"
+)
+
+const (
+	metadataKeyRunning  = "cron-running"
+	metadataKeySchedule = "cron-schedule"
+	metadataKeyContext  = "cron-context"
 )
 
 type Context any
@@ -51,6 +58,7 @@ type Component struct {
 	settings Settings
 	cancel   context.CancelFunc
 	nextTick time.Time
+	handler  module.Handler
 
 	runMu sync.Mutex
 }
@@ -65,13 +73,18 @@ func (c *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Cron",
-		Info:        "Scheduled emitter using cron expressions. Click Start to begin emitting context on Out port according to the schedule. Supports standard cron syntax (minute hour day-of-month month day-of-week). Examples: '*/5 * * * *' (every 5 min), '0 */2 * * *' (every 2 hours), '0 9 * * 1-5' (9 AM weekdays). Click Stop to pause.",
+		Info:        "Scheduled emitter using cron expressions. Click Start to begin emitting context on Out port according to the schedule. Supports standard cron syntax (minute hour day-of-month month day-of-week). Examples: '*/5 * * * *' (every 5 min), '0 */2 * * *' (every 2 hours), '0 9 * * 1-5' (9 AM weekdays). Click Stop to pause. Cron survives pod restarts and leadership changes.",
 		Tags:        []string{"SDK"},
 	}
 }
 
 func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
+	c.handler = handler
+
 	switch port {
+	case v1alpha1.ReconcilePort:
+		return c.handleReconcile(ctx, handler, msg)
+
 	case v1alpha1.SettingsPort:
 		in, ok := msg.(Settings)
 		if !ok {
@@ -94,19 +107,77 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 			return fmt.Errorf("invalid control message")
 		}
 		if ctrl.Stop {
-			return c.stop()
+			return c.stop(handler)
 		}
 		c.mu.Lock()
 		c.settings.Context = ctrl.Context
 		c.settings.Schedule = ctrl.Schedule
 		c.mu.Unlock()
-		// Start in goroutine so we don't block the caller
+
+		c.persistRunningState(handler)
 		go c.run(context.Background(), handler)
 		return nil
 
 	default:
 		return fmt.Errorf("unknown port: %s", port)
 	}
+}
+
+func (c *Component) handleReconcile(ctx context.Context, handler module.Handler, msg interface{}) error {
+	node, ok := msg.(v1alpha1.TinyNode)
+	if !ok {
+		return nil
+	}
+
+	c.restoreSettingsFromMetadata(node.Status.Metadata)
+	c.handleOrphanedRunningState(ctx, handler, node.Status.Metadata)
+	return nil
+}
+
+func (c *Component) restoreSettingsFromMetadata(metadata map[string]string) {
+	if metadata == nil {
+		return
+	}
+
+	if schedule, ok := metadata[metadataKeySchedule]; ok && schedule != "" {
+		c.mu.Lock()
+		c.settings.Schedule = schedule
+		c.mu.Unlock()
+	}
+
+	if ctxStr, ok := metadata[metadataKeyContext]; ok && ctxStr != "" {
+		var savedCtx Context
+		if err := json.Unmarshal([]byte(ctxStr), &savedCtx); err == nil {
+			c.mu.Lock()
+			c.settings.Context = savedCtx
+			c.mu.Unlock()
+		}
+	}
+}
+
+func (c *Component) handleOrphanedRunningState(ctx context.Context, handler module.Handler, metadata map[string]string) {
+	if metadata == nil {
+		return
+	}
+
+	if _, hasRunning := metadata[metadataKeyRunning]; !hasRunning {
+		return
+	}
+
+	// Already running locally
+	c.mu.Lock()
+	if c.cancel != nil {
+		c.mu.Unlock()
+		return
+	}
+	c.mu.Unlock()
+
+	if !utils.IsLeader(ctx) {
+		return
+	}
+
+	log.Info().Msg("cron component: resuming after pod restart or leadership change")
+	go c.run(context.Background(), handler)
 }
 
 func (c *Component) run(ctx context.Context, handler module.Handler) error {
@@ -127,6 +198,7 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 		c.mu.Lock()
 		c.cancel = nil
 		c.mu.Unlock()
+		c.clearRunningMetadata(handler)
 		return fmt.Errorf("invalid cron expression %q: %w", schedule, err)
 	}
 
@@ -192,14 +264,44 @@ func (c *Component) waitUntil(ctx context.Context, t time.Time) error {
 	}
 }
 
-func (c *Component) stop() error {
+func (c *Component) stop(handler module.Handler) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.cancel != nil {
 		c.cancel()
 	}
+	c.clearRunningMetadata(handler)
 	return nil
+}
+
+func (c *Component) persistRunningState(handler module.Handler) {
+	c.mu.Lock()
+	schedule := c.settings.Schedule
+	cronCtx := c.settings.Context
+	c.mu.Unlock()
+
+	ctxBytes, _ := json.Marshal(cronCtx)
+	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		if n.Status.Metadata == nil {
+			n.Status.Metadata = make(map[string]string)
+		}
+		n.Status.Metadata[metadataKeyRunning] = "true"
+		n.Status.Metadata[metadataKeySchedule] = schedule
+		n.Status.Metadata[metadataKeyContext] = string(ctxBytes)
+		return nil
+	})
+}
+
+func (c *Component) clearRunningMetadata(handler module.Handler) {
+	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		if n.Status.Metadata != nil {
+			delete(n.Status.Metadata, metadataKeyRunning)
+			delete(n.Status.Metadata, metadataKeySchedule)
+			delete(n.Status.Metadata, metadataKeyContext)
+		}
+		return nil
+	})
 }
 
 func (c *Component) Ports() []module.Port {
@@ -207,6 +309,7 @@ func (c *Component) Ports() []module.Port {
 	defer c.mu.Unlock()
 
 	return []module.Port{
+		{Name: v1alpha1.ReconcilePort},
 		{Name: v1alpha1.SettingsPort, Label: "Settings", Configuration: c.settings},
 		{Name: OutPort, Label: "Out", Source: true, Position: module.Right, Configuration: new(Context)},
 		{Name: v1alpha1.ControlPort, Label: "Control", Source: true, Configuration: c.control()},
