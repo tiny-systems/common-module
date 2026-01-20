@@ -100,7 +100,9 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 		c.settings.Context = ctrl.Context
 		c.settings.Schedule = ctrl.Schedule
 		c.mu.Unlock()
-		return c.run(ctx, handler)
+		// Start in goroutine so we don't block the caller
+		go c.run(context.Background(), handler)
+		return nil
 
 	default:
 		return fmt.Errorf("unknown port: %s", port)
