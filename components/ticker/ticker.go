@@ -166,11 +166,12 @@ func (t *Component) handleControl(ctx context.Context, handler module.Handler, m
 	return t.emit(ctx, handler)
 }
 
-func (t *Component) emit(ctx context.Context, handler module.Handler) error {
+func (t *Component) emit(_ context.Context, handler module.Handler) error {
 	t.runLock.Lock()
 	defer t.runLock.Unlock()
 
-	runCtx, runCancel := context.WithCancel(ctx)
+	// Use Background context - emit is long-running and shouldn't inherit caller's deadline
+	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
 	t.setCancelFunc(runCancel)
