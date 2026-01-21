@@ -4,19 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
+	"github.com/goccy/go-json"
+	"github.com/rs/zerolog/log"
 	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
 	"go.opentelemetry.io/otel/trace"
-	"sync"
-	"time"
 )
 
 const (
 	ComponentName        = "ticker"
 	OutPort       string = "out"
+
+	metadataKeyRunning = "ticker-running"
+	metadataKeyConfig  = "ticker-config"
 )
 
 type Context any
@@ -28,7 +34,6 @@ type Settings struct {
 
 type Component struct {
 	settings Settings
-	ctx      context.Context
 
 	cancelFunc     context.CancelFunc
 	cancelFuncLock *sync.Mutex
@@ -54,7 +59,6 @@ type Control struct {
 }
 
 func (c Control) PrepareJSONSchema(schema *jsonschema.Schema) error {
-
 	if c.Start {
 		delete(schema.Properties, "stop")
 	} else {
@@ -69,14 +73,100 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Ticker",
-		Info:        "Periodic emitter. Click Start to begin emitting context on Out. Uses blocking API: waits for Out port to unblock (downstream completes), then waits [delay] ms before next emit. Click Stop to pause. Use for polling or scheduled triggers.",
+		Info:        "Periodic emitter. Click Start to begin emitting context on Out. Waits for Out port to complete, then waits [delay] ms before next emit. Click Stop to pause. Survives pod restarts via metadata persistence.",
 		Tags:        []string{"SDK"},
 	}
 }
 
-// Emit non a pointer receiver copies Component with copy of settings
-func (t *Component) emit(ctx context.Context, handler module.Handler) error {
+func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
+	switch port {
+	case v1alpha1.SettingsPort:
+		in, ok := msg.(Settings)
+		if !ok {
+			return fmt.Errorf("invalid settings")
+		}
+		t.settings = in
+		return nil
 
+	case v1alpha1.ReconcilePort:
+		return t.handleReconcile(ctx, handler, msg)
+
+	case v1alpha1.ControlPort:
+		return t.handleControl(ctx, handler, msg)
+	}
+
+	return fmt.Errorf("invalid port: %s", port)
+}
+
+func (t *Component) handleReconcile(ctx context.Context, handler module.Handler, msg interface{}) error {
+	node, ok := msg.(v1alpha1.TinyNode)
+	if !ok {
+		return nil
+	}
+
+	if node.Status.Metadata == nil {
+		return nil
+	}
+
+	// Check if we should be running
+	if _, running := node.Status.Metadata[metadataKeyRunning]; !running {
+		return nil
+	}
+
+	// Already running, skip
+	if t.isRunning() {
+		return nil
+	}
+
+	// Only leader restarts
+	if !utils.IsLeader(ctx) {
+		return nil
+	}
+
+	// Restore config from metadata
+	if configStr, ok := node.Status.Metadata[metadataKeyConfig]; ok {
+		var cfg Settings
+		if err := json.Unmarshal([]byte(configStr), &cfg); err == nil {
+			t.settings = cfg
+		}
+	}
+
+	log.Info().Interface("settings", t.settings).Msg("ticker: restoring from metadata")
+	go t.emit(ctx, handler)
+
+	return nil
+}
+
+func (t *Component) handleControl(ctx context.Context, handler module.Handler, msg interface{}) error {
+	if msg == nil {
+		return nil
+	}
+
+	if !utils.IsLeader(ctx) {
+		return nil
+	}
+
+	ctrl, ok := msg.(Control)
+	if !ok {
+		return nil
+	}
+
+	if ctrl.Stop {
+		t.clearMetadata(handler)
+		return t.stop()
+	}
+
+	t.settings.Context = ctrl.Context
+	t.persistMetadata(handler)
+
+	if t.isRunning() {
+		return nil
+	}
+
+	return t.emit(ctx, handler)
+}
+
+func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 	t.runLock.Lock()
 	defer t.runLock.Unlock()
 
@@ -84,7 +174,6 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 	defer runCancel()
 
 	t.setCancelFunc(runCancel)
-	// reconcile so show we are listening
 	_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
 
 	defer func() {
@@ -94,6 +183,7 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 
 	timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
 	defer timer.Stop()
+
 	for {
 		select {
 		case <-timer.C:
@@ -105,43 +195,32 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
-
 			return err
 		}
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
-
-	switch port {
-	case v1alpha1.SettingsPort:
-		in, ok := msg.(Settings)
-		if !ok {
-			return fmt.Errorf("invalid settings")
+func (t *Component) persistMetadata(handler module.Handler) {
+	configBytes, _ := json.Marshal(t.settings)
+	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		if n.Status.Metadata == nil {
+			n.Status.Metadata = make(map[string]string)
 		}
-		t.settings = in
-
+		n.Status.Metadata[metadataKeyRunning] = "true"
+		n.Status.Metadata[metadataKeyConfig] = string(configBytes)
 		return nil
+	})
+}
 
-	case v1alpha1.ControlPort:
-		if msg == nil {
-			break
-		}
-
-		if !utils.IsLeader(ctx) {
+func (t *Component) clearMetadata(handler module.Handler) {
+	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		if n.Status.Metadata == nil {
 			return nil
 		}
-		switch msg.(type) {
-		case Control:
-			if msg.(Control).Stop {
-				return t.stop()
-			}
-			t.settings.Context = msg.(Control).Context
-			return t.emit(ctx, handler)
-		}
-	}
-
-	return fmt.Errorf("invalid port: %s", port)
+		delete(n.Status.Metadata, metadataKeyRunning)
+		delete(n.Status.Metadata, metadataKeyConfig)
+		return nil
+	})
 }
 
 func (t *Component) setCancelFunc(f func()) {
@@ -153,12 +232,10 @@ func (t *Component) setCancelFunc(f func()) {
 func (t *Component) isRunning() bool {
 	t.cancelFuncLock.Lock()
 	defer t.cancelFuncLock.Unlock()
-
 	return t.cancelFunc != nil
 }
 
 func (t *Component) stop() error {
-
 	t.cancelFuncLock.Lock()
 	defer t.cancelFuncLock.Unlock()
 
@@ -170,12 +247,15 @@ func (t *Component) stop() error {
 }
 
 func (t *Component) Ports() []module.Port {
-
-	ports := []module.Port{
+	return []module.Port{
 		{
 			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
 			Configuration: t.settings,
+		},
+		{
+			Name:          v1alpha1.ReconcilePort,
+			Label:         "Reconcile",
 		},
 		{
 			Name:          OutPort,
@@ -191,8 +271,6 @@ func (t *Component) Ports() []module.Port {
 			Configuration: t.getControl(),
 		},
 	}
-
-	return ports
 }
 
 func (t *Component) getControl() interface{} {
