@@ -183,7 +183,6 @@ func (t *Component) Ports() []module.Port {
 			Source:        true,
 			Position:      module.Right,
 			Configuration: new(Context),
-			Blocking:      true,
 		},
 		{
 			Name:          v1alpha1.ControlPort,
