@@ -6,41 +6,11 @@ Contains basic components for flow-based programming.
 
 ### Signal
 
-Flow trigger with blocking output. Click Send to emit context on Out port and start the flow. The Out port is a **blocking port** - Signal keeps running (edge animated) until the connected component stops or Reset is clicked.
+Flow trigger. Click Send to emit context on Out port.
 
 **Use cases:**
-- Start/stop HTTP servers
-- Control long-running operations
-- Lifecycle management of downstream components
-
-### Blocking Edges
-
-The `Blocking: true` flag on a port creates a persistent, lifecycle-controlled connection:
-
-| Aspect | Regular Edge | Blocking Edge |
-|--------|--------------|---------------|
-| Wait behavior | Waits for response (ms-seconds) | Waits until target stops (minutes-hours) |
-| Persistence | None | TinyState in K8s |
-| Survives restarts | No | Yes |
-| Cascade deletion | No | Yes (source deleted → target stops) |
-| Edge animation | Brief | Continuous while active |
-
-**When to use Blocking:**
-- Target runs continuously (servers, watchers, connections)
-- Source controls target's lifecycle
-- Need restart tolerance
-- Want cascade deletion
-
-**When to use Regular:**
-- Data processing (request → transform → response)
-- One-time operations
-- Fast request-response patterns
-
-**Example:**
-```
-Signal (blocking) → HTTP Server    # Server runs while Signal is active
-Cron (regular) → Debug            # Each tick is independent
-```
+- Trigger flows manually
+- Send configuration to downstream components
 
 ## Build locally
 
