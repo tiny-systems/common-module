@@ -99,7 +99,7 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 	return fmt.Errorf("unknown port: %s", port)
 }
 
-func (c *Component) handleMessage(ctx context.Context, handler module.Handler, msg Message) error {
+func (c *Component) handleMessage(ctx context.Context, handler module.Handler, msg Message) any {
 	c.configLock.RLock()
 	config := c.config
 	c.configLock.RUnlock()
@@ -114,13 +114,7 @@ func (c *Component) handleMessage(ctx context.Context, handler module.Handler, m
 		Config:  config,
 	}
 
-	result := handler(ctx, OutputPort, output)
-	if result != nil {
-		if err, ok := result.(error); ok {
-			return err
-		}
-	}
-	return nil
+	return handler(ctx, OutputPort, output)
 }
 
 func (c *Component) handleError(ctx context.Context, handler module.Handler, msg Message, errMsg string) error {
