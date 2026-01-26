@@ -210,4 +210,4 @@ require (
 
 replace github.com/tiny-systems/module => ../../module
 
-replace github.com/spyzhov/ajson v0.9.4 => github.com/tiny-systems/ajson v0.1.3
+replace github.com/spyzhov/ajson v0.9.4 => github.com/tiny-systems/ajson v0.1.4
