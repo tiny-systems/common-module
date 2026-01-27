@@ -117,14 +117,15 @@ func (c *Component) handleMessage(ctx context.Context, handler module.Handler, m
 	return handler(ctx, OutputPort, output)
 }
 
-func (c *Component) handleError(ctx context.Context, handler module.Handler, msg Message, errMsg string) error {
+func (c *Component) handleError(ctx context.Context, handler module.Handler, msg Message, errMsg string) any {
 	if c.settings.EnableErrorPort {
-		_ = handler(ctx, ErrorPort, Error{
+		// Return handler result to propagate responses back through the call chain
+		// (critical for blocking I/O patterns like HTTP Server)
+		return handler(ctx, ErrorPort, Error{
 			Context: msg.Context,
 			Error:   errMsg,
 			Message: msg,
 		})
-		return nil
 	}
 	return fmt.Errorf(errMsg)
 }
