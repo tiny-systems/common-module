@@ -48,8 +48,9 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 	}
 
 	time.Sleep(time.Millisecond * time.Duration(in.Delay))
-	_ = handler(ctx, OutPort, in.Context)
-	return nil
+	// Return handler result to propagate responses back through the call chain
+	// (critical for blocking I/O patterns like HTTP Server)
+	return handler(ctx, OutPort, in.Context)
 }
 
 func (t *Component) Ports() []module.Port {
