@@ -3,6 +3,7 @@ package signal
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
@@ -33,6 +34,7 @@ type Component struct {
 	settings    Settings
 	nodeName    string
 	handler     module.Handler
+	mu          sync.Mutex // protects isRunning, sentContext, cancelFunc
 	isRunning   bool
 	sentContext Context
 	cancelFunc  context.CancelFunc
@@ -109,7 +111,9 @@ func (t *Component) restoreContextFromMetadata(metadata map[string]string) {
 	if err := json.Unmarshal([]byte(ctxStr), &savedCtx); err != nil {
 		return
 	}
+	t.mu.Lock()
 	t.sentContext = savedCtx
+	t.mu.Unlock()
 }
 
 func (t *Component) handleOrphanedRunningState(ctx context.Context, handler module.Handler, metadata map[string]string) {
@@ -121,33 +125,40 @@ func (t *Component) handleOrphanedRunningState(ctx context.Context, handler modu
 		return
 	}
 
+	t.mu.Lock()
 	if t.cancelFunc != nil {
 		t.isRunning = true
+		t.mu.Unlock()
 		return
 	}
 
 	if !utils.IsLeader(ctx) {
+		t.mu.Unlock()
 		return
 	}
 
 	// Resume the flow instead of clearing - pod restarted while running
 	if t.sentContext == nil {
+		t.mu.Unlock()
 		log.Warn().Msg("signal component: cannot resume - no saved context, clearing orphaned state")
 		t.clearRunningMetadata(handler)
 		return
 	}
+	t.mu.Unlock()
 
 	log.Info().Msg("signal component: resuming flow after pod restart")
 	t.resumeBlockingCall(handler)
 }
 
 func (t *Component) resumeBlockingCall(handler module.Handler) {
+	t.mu.Lock()
 	t.isRunning = true
-
 	sendCtx, cancel := context.WithCancel(context.Background())
 	t.cancelFunc = cancel
+	sentCtx := t.sentContext
+	t.mu.Unlock()
 
-	go t.runBlockingCall(handler, sendCtx, t.sentContext)
+	go t.runBlockingCall(handler, sendCtx, sentCtx)
 }
 
 func (t *Component) handleControl(ctx context.Context, handler module.Handler, msg interface{}) error {
@@ -183,13 +194,15 @@ func (t *Component) handleControl(ctx context.Context, handler module.Handler, m
 func (t *Component) handleReset(handler module.Handler) error {
 	log.Info().Msg("signal component: reset requested")
 
+	t.mu.Lock()
 	if t.cancelFunc != nil {
 		log.Info().Msg("signal component: cancelling blocking call")
 		t.cancelFunc()
 		t.cancelFunc = nil
 	}
-
 	t.isRunning = false
+	t.mu.Unlock()
+
 	t.clearRunningMetadata(handler)
 	return nil
 }
@@ -197,11 +210,12 @@ func (t *Component) handleReset(handler module.Handler) error {
 func (t *Component) handleSend(handler module.Handler, sendContext Context) error {
 	log.Info().Msg("signal component: send requested, calling OutPort")
 
+	t.mu.Lock()
 	t.isRunning = true
 	t.sentContext = sendContext
-
 	sendCtx, cancel := context.WithCancel(context.Background())
 	t.cancelFunc = cancel
+	t.mu.Unlock()
 
 	t.persistRunningState(handler, sendContext)
 
@@ -215,8 +229,10 @@ func (t *Component) runBlockingCall(handler module.Handler, ctx context.Context,
 
 	log.Info().Interface("result", result).Msg("signal component: OutPort returned, send complete")
 
+	t.mu.Lock()
 	t.isRunning = false
 	t.cancelFunc = nil
+	t.mu.Unlock()
 
 	t.clearRunningMetadata(handler)
 	_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
@@ -253,11 +269,16 @@ func (t *Component) handleSettings(msg interface{}) error {
 }
 
 func (t *Component) Ports() []module.Port {
-	log.Info().Bool("isRunning", t.isRunning).Msg("signal component: Ports() called")
+	t.mu.Lock()
+	isRunning := t.isRunning
+	sentContext := t.sentContext
+	t.mu.Unlock()
+
+	log.Info().Bool("isRunning", isRunning).Msg("signal component: Ports() called")
 
 	controlContext := t.settings.Context
-	if t.sentContext != nil {
-		controlContext = t.sentContext
+	if sentContext != nil {
+		controlContext = sentContext
 	}
 
 	return []module.Port{
@@ -282,7 +303,7 @@ func (t *Component) Ports() []module.Port {
 			Source: true,
 			Configuration: Control{
 				Context:     controlContext,
-				ResetEnable: t.isRunning,
+				ResetEnable: isRunning,
 			},
 		},
 	}
