@@ -32,11 +32,6 @@ type Settings struct {
 	Delay   int     `json:"delay" required:"true" title:"Delay (ms)" description:"Delay between signals" minimum:"0" default:"1000"`
 }
 
-// OutMessage wraps Context so the Out port schema has $defs/Context for schema extension propagation
-type OutMessage struct {
-	Context Context `json:"context" title:"Context"`
-}
-
 type Component struct {
 	settings Settings
 
@@ -193,7 +188,7 @@ func (t *Component) emit(_ context.Context, handler module.Handler) error {
 	for {
 		select {
 		case <-timer.C:
-			_ = handler(trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{})), OutPort, OutMessage{Context: t.settings.Context})
+			_ = handler(trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{})), OutPort, t.settings.Context)
 			timer.Reset(time.Duration(t.settings.Delay) * time.Millisecond)
 
 		case <-runCtx.Done():
@@ -268,7 +263,7 @@ func (t *Component) Ports() []module.Port {
 			Label:         "Out",
 			Source:        true,
 			Position:      module.Right,
-			Configuration: new(OutMessage),
+			Configuration: new(Context),
 		},
 		{
 			Name:          v1alpha1.ControlPort,
