@@ -11,7 +11,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.19.0
 	github.com/swaggest/jsonschema-go v0.3.70
-	github.com/tiny-systems/module v0.1.266
+	github.com/tiny-systems/module v0.1.285
 	go.opentelemetry.io/otel/trace v1.39.0
 )
 
@@ -145,7 +145,7 @@ require (
 	github.com/tiny-systems/ajson v0.1.6 // indirect
 	github.com/tiny-systems/errorpanic v0.7.1 // indirect
 	github.com/tiny-systems/otel-collector v0.5.1 // indirect
-	github.com/tiny-systems/platform-api v0.0.14 // indirect
+	github.com/tiny-systems/platform-api v0.0.15 // indirect
 	github.com/vmware-labs/yaml-jsonpath v0.3.2 // indirect
 	github.com/woodsbury/decimal128 v1.3.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
