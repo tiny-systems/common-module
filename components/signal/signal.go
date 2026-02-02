@@ -30,6 +30,11 @@ type Settings struct {
 	Context Context `json:"context" required:"true" configurable:"true" title:"Context" description:"Arbitrary message to send"`
 }
 
+// OutMessage wraps Context so the Out port schema has $defs/Context for schema extension propagation
+type OutMessage struct {
+	Context Context `json:"context" title:"Context"`
+}
+
 type Component struct {
 	settings    Settings
 	nodeName    string
@@ -225,7 +230,7 @@ func (t *Component) handleSend(handler module.Handler, sendContext Context) erro
 }
 
 func (t *Component) runBlockingCall(handler module.Handler, ctx context.Context, sendContext Context) {
-	result := handler(ctx, OutPort, sendContext)
+	result := handler(ctx, OutPort, OutMessage{Context: sendContext})
 
 	log.Info().Interface("result", result).Msg("signal component: OutPort returned, send complete")
 
@@ -295,7 +300,7 @@ func (t *Component) Ports() []module.Port {
 			Label:         "Out",
 			Source:        true,
 			Position:      module.Right,
-			Configuration: new(Context),
+			Configuration: new(OutMessage),
 		},
 		{
 			Name:   v1alpha1.ControlPort,
