@@ -295,7 +295,7 @@ func (t *Component) Ports() []module.Port {
 			Label:         "Out",
 			Source:        true,
 			Position:      module.Right,
-			Configuration: new(Context),
+			Configuration: t.settings.Context,
 		},
 		{
 			Name:   v1alpha1.ControlPort,
