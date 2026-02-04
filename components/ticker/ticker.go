@@ -175,11 +175,13 @@ func (t *Component) emit(_ context.Context, handler module.Handler) error {
 	defer runCancel()
 
 	t.setCancelFunc(runCancel)
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+	// Update control port to show Running
+	_ = handler(context.Background(), v1alpha1.ControlPort, t.getControl())
 
 	defer func() {
 		t.setCancelFunc(nil)
-		_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+		// Update control port to show Not running
+		_ = handler(context.Background(), v1alpha1.ControlPort, t.getControl())
 	}()
 
 	timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
