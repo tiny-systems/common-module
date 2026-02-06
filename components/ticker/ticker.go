@@ -166,13 +166,22 @@ func (t *Component) handleControl(ctx context.Context, handler module.Handler, m
 	return t.emit(ctx, handler)
 }
 
-func (t *Component) emit(_ context.Context, handler module.Handler) error {
+func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 	t.runLock.Lock()
 	defer t.runLock.Unlock()
 
 	// Use Background context - emit is long-running and shouldn't inherit caller's deadline
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
+
+	// Bridge: cancel emit when parent context is done (e.g., runner shutdown)
+	go func() {
+		select {
+		case <-ctx.Done():
+			runCancel()
+		case <-runCtx.Done():
+		}
+	}()
 
 	t.setCancelFunc(runCancel)
 	// Update control port to show Running
