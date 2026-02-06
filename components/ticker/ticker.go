@@ -132,7 +132,7 @@ func (t *Component) handleReconcile(ctx context.Context, handler module.Handler,
 	}
 
 	log.Info().Interface("settings", t.settings).Msg("ticker: restoring from metadata")
-	go t.emit(context.Background(), handler)
+	go t.emit(ctx, handler)
 
 	return nil
 }
@@ -163,25 +163,25 @@ func (t *Component) handleControl(ctx context.Context, handler module.Handler, m
 		return nil
 	}
 
-	// Start emit asynchronously — Handle() must not block on long-running I/O.
-	// The signal/gRPC request context has a deadline that would kill the ticker.
-	// Ticker lifetime is controlled via t.stop() and reconcile metadata.
-	go func() {
-		_ = t.emit(context.Background(), handler)
-	}()
-
-	return nil
+	return t.emit(ctx, handler)
 }
 
 func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 	t.runLock.Lock()
 	defer t.runLock.Unlock()
 
-	// Use Background context - emit is long-running and shouldn't inherit caller's deadline.
-	// No bridge from parent ctx: ticker lifetime is controlled via t.stop() and reconcile.
-	// Bridging parent ctx caused the ticker to die on gRPC/signal context timeout.
+	// Use Background context - emit is long-running and shouldn't inherit caller's deadline
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
+
+	// Bridge: cancel emit when parent context is done (e.g., runner shutdown)
+	go func() {
+		select {
+		case <-ctx.Done():
+			runCancel()
+		case <-runCtx.Done():
+		}
+	}()
 
 	t.setCancelFunc(runCancel)
 	// Update control port to show Running
