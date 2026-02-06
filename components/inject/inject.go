@@ -2,6 +2,7 @@ package inject
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -127,7 +128,7 @@ func (c *Component) handleError(ctx context.Context, handler module.Handler, msg
 			Message: msg,
 		})
 	}
-	return fmt.Errorf(errMsg)
+	return errors.New(errMsg)
 }
 
 func (c *Component) Ports() []module.Port {
