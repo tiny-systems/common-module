@@ -163,7 +163,8 @@ func (t *Component) handleControl(ctx context.Context, handler module.Handler, m
 		return nil
 	}
 
-	return t.emit(ctx, handler)
+	go t.emit(context.Background(), handler)
+	return nil
 }
 
 func (t *Component) emit(ctx context.Context, handler module.Handler) error {
