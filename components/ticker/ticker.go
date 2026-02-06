@@ -194,7 +194,7 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 		_ = handler(context.Background(), v1alpha1.ControlPort, t.getControl())
 	}()
 
-	timer := time.NewTimer(time.Duration(t.settings.Delay) * time.Millisecond)
+	timer := time.NewTimer(0) // first tick fires immediately
 	defer timer.Stop()
 
 	for {
