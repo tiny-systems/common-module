@@ -302,6 +302,11 @@ func (t *Component) getControl() interface{} {
 }
 
 var _ module.Component = (*Component)(nil)
+var _ module.Destroyer = (*Component)(nil)
+
+func (t *Component) OnDestroy(_ map[string]string) {
+	t.stop()
+}
 
 func init() {
 	registry.Register((&Component{}).Instance())
