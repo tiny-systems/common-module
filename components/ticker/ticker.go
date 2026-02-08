@@ -28,7 +28,7 @@ const (
 type Context any
 
 type Settings struct {
-	Context Context `json:"context,omitempty" configurable:"true" title:"Context" description:"Arbitrary message to be send each period of time"`
+	Context Context `json:"context" configurable:"true" title:"Context" description:"Arbitrary message to be send each period of time"`
 	Delay   int     `json:"delay" required:"true" title:"Delay (ms)" description:"Delay between signals" minimum:"0" default:"1000"`
 }
 
@@ -283,8 +283,8 @@ func (t *Component) Ports() []module.Port {
 			Configuration: t.settings,
 		},
 		{
-			Name:          v1alpha1.ReconcilePort,
-			Label:         "Reconcile",
+			Name:  v1alpha1.ReconcilePort,
+			Label: "Reconcile",
 		},
 		{
 			Name:          OutPort,

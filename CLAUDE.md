@@ -42,19 +42,19 @@ type Context any
 
 // Request input
 type Request struct {
-    Context Context `json:"context,omitempty" configurable:"true" title:"Context"`
+    Context Context `json:"context" configurable:"true" title:"Context"`
     // ... other fields
 }
 
 // Output struct
 type Output struct {
-    Context Context `json:"context,omitempty" configurable:"true" title:"Context"`
+    Context Context `json:"context" configurable:"true" title:"Context"`
     // ... other fields
 }
 
 // Error output - only Context and Error, no Request duplication
 type Error struct {
-    Context Context `json:"context,omitempty" configurable:"true" title:"Context"`
+    Context Context `json:"context" configurable:"true" title:"Context"`
     Error   string  `json:"error" title:"Error"`
 }
 ```
