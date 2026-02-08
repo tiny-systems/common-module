@@ -39,6 +39,11 @@ type Component struct {
 	cancelFuncLock *sync.Mutex
 
 	runLock *sync.Mutex
+
+	// contextFromControl is set when the control port provides a Context value.
+	// When true, _settings delivery preserves the control-set Context instead of
+	// overwriting it with potentially stale CRD values (delivery order is not guaranteed).
+	contextFromControl bool
 }
 
 func (t *Component) Instance() module.Component {
@@ -85,6 +90,9 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		if !ok {
 			return fmt.Errorf("invalid settings")
 		}
+		if t.contextFromControl {
+			in.Context = t.settings.Context
+		}
 		t.settings = in
 		return nil
 
@@ -128,6 +136,7 @@ func (t *Component) handleReconcile(ctx context.Context, handler module.Handler,
 		var cfg Settings
 		if err := json.Unmarshal([]byte(configStr), &cfg); err == nil {
 			t.settings = cfg
+			t.contextFromControl = true
 		}
 	}
 
@@ -152,11 +161,13 @@ func (t *Component) handleControl(ctx context.Context, handler module.Handler, m
 	}
 
 	if ctrl.Stop {
+		t.contextFromControl = false
 		t.clearMetadata(handler)
 		return t.stop()
 	}
 
 	t.settings.Context = ctrl.Context
+	t.contextFromControl = true
 	t.persistMetadata(handler)
 
 	if t.isRunning() {
