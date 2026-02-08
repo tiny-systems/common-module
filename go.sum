@@ -436,6 +436,8 @@ github.com/tiny-systems/module v0.1.296 h1:ky1lkUVRuB+aSiWrtNg+Wv85c69gbE3exF+tK
 github.com/tiny-systems/module v0.1.296/go.mod h1:xXJhuEjV+tI2ErzADDsASEkWjfZlM3hpjlltGupRuk4=
 github.com/tiny-systems/module v0.1.297 h1:9s46A51/MuBBj+qKINwkBqbJcPL7OB88lGyrvN5Zhzs=
 github.com/tiny-systems/module v0.1.297/go.mod h1:xXJhuEjV+tI2ErzADDsASEkWjfZlM3hpjlltGupRuk4=
+github.com/tiny-systems/module v0.1.298 h1:x1mMmq/XV6rpUwGJ8teVsY235Vwj44xxil8GQzHIRQg=
+github.com/tiny-systems/module v0.1.298/go.mod h1:xXJhuEjV+tI2ErzADDsASEkWjfZlM3hpjlltGupRuk4=
 github.com/tiny-systems/otel-collector v0.5.1 h1:tylLj7f7O7n5o9R383Lojd0fN7j5jgZ76zFshJ0SE6c=
 github.com/tiny-systems/otel-collector v0.5.1/go.mod h1:EGo1dQ3+5iG3ejGJ8y9kMgHhOGB6WyoasJDUHesKXEA=
 github.com/tiny-systems/platform-api v0.0.15 h1:E2vALkQSO1iEQK5KPdFVWud48/lP4Xg+rkYmxn2qlFI=
