@@ -92,7 +92,11 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 		}
 		c.mu.Lock()
 		c.settings = in
+		isRunning := c.cancel != nil
 		c.mu.Unlock()
+		if isRunning {
+			c.persistRunningState(handler)
+		}
 		return nil
 
 	case v1alpha1.ControlPort:
