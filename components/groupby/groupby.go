@@ -25,7 +25,7 @@ type Item any
 
 // InMessage is the input
 type InMessage struct {
-	Context     Context `json:"context,omitempty" configurable:"true" title:"Context" description:"Arbitrary data passed through to output"`
+	Context     Context `json:"context" configurable:"true" title:"Context" description:"Arbitrary data passed through to output"`
 	Items       []Item  `json:"items" required:"true" configurable:"true" title:"Items" description:"Array of items to group"`
 	GroupByPath string  `json:"groupByPath" required:"true" configurable:"true" title:"Group By Path" description:"JSON path to group by (e.g., 'labels.app', 'namespace', 'kind')"`
 }

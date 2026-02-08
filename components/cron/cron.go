@@ -31,7 +31,7 @@ const (
 type Context any
 
 type Settings struct {
-	Context  Context `json:"context,omitempty" configurable:"true" title:"Context" description:"Arbitrary message to send on each scheduled execution"`
+	Context  Context `json:"context" configurable:"true" title:"Context" description:"Arbitrary message to send on each scheduled execution"`
 	Schedule string  `json:"schedule" required:"true" title:"Schedule" description:"Cron expression (e.g., '*/5 * * * *' for every 5 minutes, '0 9 * * 1-5' for 9 AM on weekdays)" default:"*/1 * * * *"`
 }
 
