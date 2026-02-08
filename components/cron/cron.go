@@ -26,6 +26,7 @@ const (
 	metadataKeyRunning  = "cron-running"
 	metadataKeySchedule = "cron-schedule"
 	metadataKeyContext  = "cron-context"
+	metadataKeyError    = "cron-error"
 )
 
 type Context any
@@ -64,7 +65,8 @@ type Component struct {
 	// When true, _reconcile skips metadata restore to avoid overwriting fresh values.
 	settingsFromPort bool
 
-	runMu sync.Mutex
+	lastError string
+	runMu     sync.Mutex
 }
 
 func (c *Component) Instance() module.Component {
@@ -118,11 +120,25 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 		if ctrl.Stop {
 			return c.stop(handler)
 		}
+
+		// Validate schedule before starting
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		if _, err := parser.Parse(ctrl.Schedule); err != nil {
+			errMsg := fmt.Sprintf("invalid schedule %q: %v", ctrl.Schedule, err)
+			c.mu.Lock()
+			c.lastError = errMsg
+			c.mu.Unlock()
+			c.persistError(handler, errMsg)
+			return nil
+		}
+
 		c.mu.Lock()
 		c.settings.Context = ctrl.Context
 		c.settings.Schedule = ctrl.Schedule
 		c.settingsFromPort = true
+		c.lastError = ""
 		c.mu.Unlock()
+		c.clearError(handler)
 
 		c.persistRunningState(handler)
 		go c.run(context.Background(), handler)
@@ -169,6 +185,12 @@ func (c *Component) restoreSettingsFromMetadata(metadata map[string]string) {
 			c.settings.Context = savedCtx
 			c.mu.Unlock()
 		}
+	}
+
+	if errMsg, ok := metadata[metadataKeyError]; ok {
+		c.mu.Lock()
+		c.lastError = errMsg
+		c.mu.Unlock()
 	}
 }
 
@@ -316,6 +338,26 @@ func (c *Component) clearRunningMetadata(handler module.Handler) {
 			delete(n.Status.Metadata, metadataKeyRunning)
 			delete(n.Status.Metadata, metadataKeySchedule)
 			delete(n.Status.Metadata, metadataKeyContext)
+			delete(n.Status.Metadata, metadataKeyError)
+		}
+		return nil
+	})
+}
+
+func (c *Component) persistError(handler module.Handler, errMsg string) {
+	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		if n.Status.Metadata == nil {
+			n.Status.Metadata = make(map[string]string)
+		}
+		n.Status.Metadata[metadataKeyError] = errMsg
+		return nil
+	})
+}
+
+func (c *Component) clearError(handler module.Handler) {
+	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		if n.Status.Metadata != nil {
+			delete(n.Status.Metadata, metadataKeyError)
 		}
 		return nil
 	})
@@ -348,10 +390,15 @@ func (c *Component) control() Control {
 		}
 	}
 
+	status := "Not running"
+	if c.lastError != "" {
+		status = c.lastError
+	}
+
 	return Control{
 		Context:  c.settings.Context,
 		Schedule: c.settings.Schedule,
-		Status:   "Not running",
+		Status:   status,
 		Start:    true,
 	}
 }
