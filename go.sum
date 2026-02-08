@@ -432,6 +432,8 @@ github.com/tiny-systems/errorpanic v0.7.1 h1:GgbimfhC2wnQ8012SGGxh743ryaJXSSD7bo
 github.com/tiny-systems/errorpanic v0.7.1/go.mod h1:AQobicdSB/J3RzN81pTG4dqgcULaEIrEOvNC8TpSgxw=
 github.com/tiny-systems/module v0.1.295 h1:bcaTjWSy9RAbr47FeqgbcjRixXOD71Gdorwm/TwkydI=
 github.com/tiny-systems/module v0.1.295/go.mod h1:xXJhuEjV+tI2ErzADDsASEkWjfZlM3hpjlltGupRuk4=
+github.com/tiny-systems/module v0.1.296 h1:ky1lkUVRuB+aSiWrtNg+Wv85c69gbE3exF+tKDA5c3U=
+github.com/tiny-systems/module v0.1.296/go.mod h1:xXJhuEjV+tI2ErzADDsASEkWjfZlM3hpjlltGupRuk4=
 github.com/tiny-systems/otel-collector v0.5.1 h1:tylLj7f7O7n5o9R383Lojd0fN7j5jgZ76zFshJ0SE6c=
 github.com/tiny-systems/otel-collector v0.5.1/go.mod h1:EGo1dQ3+5iG3ejGJ8y9kMgHhOGB6WyoasJDUHesKXEA=
 github.com/tiny-systems/platform-api v0.0.15 h1:E2vALkQSO1iEQK5KPdFVWud48/lP4Xg+rkYmxn2qlFI=
