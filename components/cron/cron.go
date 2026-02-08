@@ -60,6 +60,10 @@ type Component struct {
 	nextTick time.Time
 	handler  module.Handler
 
+	// settingsFromPort is set when _settings or _control port provides values.
+	// When true, _reconcile skips metadata restore to avoid overwriting fresh values.
+	settingsFromPort bool
+
 	runMu sync.Mutex
 }
 
@@ -92,6 +96,7 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 		}
 		c.mu.Lock()
 		c.settings = in
+		c.settingsFromPort = true
 		isRunning := c.cancel != nil
 		c.mu.Unlock()
 		if isRunning {
@@ -116,6 +121,7 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 		c.mu.Lock()
 		c.settings.Context = ctrl.Context
 		c.settings.Schedule = ctrl.Schedule
+		c.settingsFromPort = true
 		c.mu.Unlock()
 
 		c.persistRunningState(handler)
@@ -142,6 +148,13 @@ func (c *Component) restoreSettingsFromMetadata(metadata map[string]string) {
 	if metadata == nil {
 		return
 	}
+
+	c.mu.Lock()
+	if c.settingsFromPort {
+		c.mu.Unlock()
+		return
+	}
+	c.mu.Unlock()
 
 	if schedule, ok := metadata[metadataKeySchedule]; ok && schedule != "" {
 		c.mu.Lock()

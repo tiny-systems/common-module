@@ -40,7 +40,7 @@ type Output struct {
 // Component implements config injection with metadata persistence
 type Component struct {
 	config         any
-	configFromPort bool // set when config port provides data; prevents _reconcile from overwriting with stale metadata
+	settingsFromPort bool // set when config port provides data; prevents _reconcile from overwriting with stale metadata
 }
 
 func (c *Component) Instance() module.Component {
@@ -86,7 +86,7 @@ func (c *Component) handleReconcile(msg any) error {
 		return nil
 	}
 
-	if c.configFromPort {
+	if c.settingsFromPort {
 		return nil
 	}
 
@@ -106,7 +106,7 @@ func (c *Component) handleConfig(handler module.Handler, msg any) any {
 	}
 
 	c.config = in.Data
-	c.configFromPort = true
+	c.settingsFromPort = true
 	c.persistConfig(handler)
 	return nil
 }
