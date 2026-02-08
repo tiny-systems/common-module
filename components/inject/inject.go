@@ -28,18 +28,18 @@ type Config struct {
 
 // Message passes through with config injected
 type Message struct {
-	Context Context `json:"context,omitempty" configurable:"true" title:"Context" description:"Passthrough context for correlation"`
+	Context Context `json:"context" configurable:"true" title:"Context" description:"Passthrough context for correlation"`
 }
 
 // Output contains original context plus injected config
 type Output struct {
-	Context Context `json:"context,omitempty" configurable:"true" title:"Context"`
-	Config  Data    `json:"config,omitempty" title:"Config" description:"Injected configuration from metadata"`
+	Context Context `json:"context" configurable:"true" title:"Context"`
+	Config  Data    `json:"config" title:"Config" description:"Injected configuration from metadata"`
 }
 
 // Component implements config injection with metadata persistence
 type Component struct {
-	config         any
+	config           any
 	settingsFromPort bool // set when config port provides data; prevents _reconcile from overwriting with stale metadata
 }
 
