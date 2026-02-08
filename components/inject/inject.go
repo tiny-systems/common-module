@@ -19,10 +19,11 @@ const (
 )
 
 type Context any
+type Data any
 
 // Config is stored in metadata and injected into messages
 type Config struct {
-	Context Context `json:"context,omitempty" configurable:"true" required:"true" title:"Context" description:"Configuration data to inject into messages"`
+	Data Data `json:"data" configurable:"true" required:"true" title:"Data" description:"Configuration data to inject into messages"`
 }
 
 // Message passes through with config injected
@@ -33,7 +34,7 @@ type Message struct {
 // Output contains original context plus injected config
 type Output struct {
 	Context Context `json:"context,omitempty" configurable:"true" title:"Context"`
-	Config  Context `json:"config,omitempty" title:"Config" description:"Injected configuration from metadata"`
+	Config  Data    `json:"config,omitempty" title:"Config" description:"Injected configuration from metadata"`
 }
 
 // Component implements config injection with metadata persistence
@@ -99,7 +100,7 @@ func (c *Component) handleConfig(handler module.Handler, msg any) any {
 		return fmt.Errorf("invalid config")
 	}
 
-	c.config = in.Context
+	c.config = in.Data
 	c.persistConfig(handler)
 	return nil
 }
