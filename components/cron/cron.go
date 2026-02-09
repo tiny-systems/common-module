@@ -269,7 +269,7 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 		data := c.settings.Context
 		c.mu.Unlock()
 
-		handler(context.Background(), OutPort, data)
+		handler(ctx, OutPort, data)
 
 		if ctx.Err() != nil {
 			return nil
