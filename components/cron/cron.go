@@ -2,7 +2,6 @@ package cron
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"sync"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
-	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -271,16 +269,7 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 		data := c.settings.Context
 		c.mu.Unlock()
 
-		var traceID trace.TraceID
-		var spanID trace.SpanID
-		rand.Read(traceID[:])
-		rand.Read(spanID[:])
-		tickCtx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
-			TraceID:    traceID,
-			SpanID:     spanID,
-			TraceFlags: trace.FlagsSampled,
-		}))
-		handler(tickCtx, OutPort, data)
+		handler(context.Background(), OutPort, data)
 
 		if ctx.Err() != nil {
 			return nil
