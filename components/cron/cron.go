@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"sync"
 	"time"
@@ -270,7 +271,16 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 		data := c.settings.Context
 		c.mu.Unlock()
 
-		handler(trace.ContextWithSpanContext(ctx, trace.NewSpanContext(trace.SpanContextConfig{})), OutPort, data)
+		var traceID trace.TraceID
+		var spanID trace.SpanID
+		rand.Read(traceID[:])
+		rand.Read(spanID[:])
+		tickCtx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    traceID,
+			SpanID:     spanID,
+			TraceFlags: trace.FlagsSampled,
+		}))
+		handler(tickCtx, OutPort, data)
 
 		if ctx.Err() != nil {
 			return nil
