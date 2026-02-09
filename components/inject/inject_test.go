@@ -223,3 +223,133 @@ func TestPodRestartMultipleRounds(t *testing.T) {
 		t.Errorf("pod3: round=%v, want 2 (from pod2's update)", cfg["round"])
 	}
 }
+
+func TestConfigRequired_MessageBeforeConfig(t *testing.T) {
+	ctx := context.Background()
+	h := testharness.New((&inject.Component{}).Instance())
+
+	// Enable config required
+	h.Handle(ctx, "_settings", inject.Settings{ConfigRequired: true})
+
+	// Message arrives without config
+	h.Handle(ctx, "message", inject.Message{Context: "tick"})
+
+	// Should go to error port, not output
+	outs := h.PortOutputs("output")
+	if len(outs) != 0 {
+		t.Fatalf("expected 0 outputs, got %d — message should not pass without config", len(outs))
+	}
+
+	errs := h.PortOutputs("error")
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(errs))
+	}
+	e := errs[0].(inject.ErrorOutput)
+	if e.Context != "tick" {
+		t.Errorf("error context: got %v, want 'tick'", e.Context)
+	}
+	if e.Error != "config not set" {
+		t.Errorf("error message: got %q, want 'config not set'", e.Error)
+	}
+}
+
+func TestConfigRequired_MessageAfterConfig(t *testing.T) {
+	ctx := context.Background()
+	h := testharness.New((&inject.Component{}).Instance())
+
+	h.Handle(ctx, "_settings", inject.Settings{ConfigRequired: true})
+	h.Handle(ctx, "config", inject.Config{Data: map[string]any{"env": "prod"}})
+	h.Handle(ctx, "message", inject.Message{Context: "tick"})
+
+	// Should go to output, not error
+	errs := h.PortOutputs("error")
+	if len(errs) != 0 {
+		t.Fatalf("expected 0 errors, got %d", len(errs))
+	}
+
+	outs := h.PortOutputs("output")
+	if len(outs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(outs))
+	}
+	o := outs[0].(inject.Output)
+	if o.Config == nil {
+		t.Fatal("config is nil")
+	}
+}
+
+func TestConfigRequired_ErrorPortVisibility(t *testing.T) {
+	h := testharness.New((&inject.Component{}).Instance())
+	ctx := context.Background()
+
+	// Default: no error port
+	ports := h.Ports()
+	for _, p := range ports {
+		if p.Name == "error" {
+			t.Fatal("error port should not be visible when configRequired is false")
+		}
+	}
+
+	// Enable config required
+	h.Handle(ctx, "_settings", inject.Settings{ConfigRequired: true})
+
+	ports = h.Ports()
+	found := false
+	for _, p := range ports {
+		if p.Name == "error" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("error port should be visible when configRequired is true")
+	}
+}
+
+func TestConfigRequired_PodRestart(t *testing.T) {
+	ctx := context.Background()
+	pod1 := testharness.New((&inject.Component{}).Instance())
+
+	pod1.Handle(ctx, "_settings", inject.Settings{ConfigRequired: true})
+	pod1.Handle(ctx, "config", inject.Config{
+		Data: map[string]any{"label": "app=web"},
+	})
+
+	// Pod restart, config restored from metadata
+	pod2 := pod1.NewPod()
+	pod2.Handle(ctx, "_settings", inject.Settings{ConfigRequired: true})
+	pod2.Reconcile(ctx)
+
+	pod2.Handle(ctx, "message", inject.Message{Context: "cron-tick"})
+
+	errs := pod2.PortOutputs("error")
+	if len(errs) != 0 {
+		t.Fatalf("expected 0 errors after config restore, got %d", len(errs))
+	}
+
+	outs := pod2.PortOutputs("output")
+	if len(outs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(outs))
+	}
+	o := outs[0].(inject.Output)
+	if o.Config == nil {
+		t.Fatal("config is nil after pod restart — metadata restore failed")
+	}
+}
+
+func TestConfigNotRequired_NilConfigPassesThrough(t *testing.T) {
+	ctx := context.Background()
+	h := testharness.New((&inject.Component{}).Instance())
+
+	// Default settings: configRequired=false
+	h.Handle(ctx, "message", inject.Message{Context: "tick"})
+
+	// Should still go to output with nil config (backward compatible)
+	outs := h.PortOutputs("output")
+	if len(outs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(outs))
+	}
+	o := outs[0].(inject.Output)
+	if o.Config != nil {
+		t.Errorf("expected nil config in backward-compatible mode, got %v", o.Config)
+	}
+}

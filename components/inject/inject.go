@@ -15,11 +15,16 @@ const (
 	ConfigPort        = "config"
 	MessagePort       = "message"
 	OutputPort        = "output"
+	ErrorPort         = "error"
 	metadataKeyConfig = "inject-config"
 )
 
 type Context any
 type Data any
+
+type Settings struct {
+	ConfigRequired bool `json:"configRequired" title:"Config Required" description:"When enabled, messages arriving before config is set are sent to the error port instead of output"`
+}
 
 // Config is stored in metadata and injected into messages
 type Config struct {
@@ -37,8 +42,15 @@ type Output struct {
 	Config  Data    `json:"config" title:"Config" description:"Injected configuration from metadata"`
 }
 
+// ErrorOutput is sent when config is required but not set
+type ErrorOutput struct {
+	Context Context `json:"context" configurable:"true" title:"Context"`
+	Error   string  `json:"error" title:"Error"`
+}
+
 // Component implements config injection with metadata persistence
 type Component struct {
+	settings         Settings
 	config           any
 	settingsFromPort bool // set when config port provides data; prevents _reconcile from overwriting with stale metadata
 }
@@ -60,6 +72,14 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 	switch port {
 	case v1alpha1.ReconcilePort:
 		return c.handleReconcile(msg)
+
+	case v1alpha1.SettingsPort:
+		in, ok := msg.(Settings)
+		if !ok {
+			return fmt.Errorf("invalid settings")
+		}
+		c.settings = in
+		return nil
 
 	case ConfigPort:
 		return c.handleConfig(handler, msg)
@@ -117,6 +137,13 @@ func (c *Component) handleMessage(ctx context.Context, handler module.Handler, m
 		return fmt.Errorf("invalid message")
 	}
 
+	if c.settings.ConfigRequired && c.config == nil {
+		return handler(ctx, ErrorPort, ErrorOutput{
+			Context: in.Context,
+			Error:   "config not set",
+		})
+	}
+
 	return handler(ctx, OutputPort, Output{
 		Context: in.Context,
 		Config:  c.config,
@@ -135,7 +162,9 @@ func (c *Component) persistConfig(handler module.Handler) {
 }
 
 func (c *Component) Ports() []module.Port {
-	return []module.Port{
+	ports := []module.Port{
+		{Name: v1alpha1.ReconcilePort},
+		{Name: v1alpha1.SettingsPort, Label: "Settings", Configuration: c.settings},
 		{
 			Name:          ConfigPort,
 			Label:         "Config",
@@ -156,6 +185,16 @@ func (c *Component) Ports() []module.Port {
 			Position:      module.Right,
 		},
 	}
+	if c.settings.ConfigRequired {
+		ports = append(ports, module.Port{
+			Name:          ErrorPort,
+			Label:         "Error",
+			Source:        true,
+			Configuration: ErrorOutput{},
+			Position:      module.Bottom,
+		})
+	}
+	return ports
 }
 
 var _ module.Component = (*Component)(nil)
