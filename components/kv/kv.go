@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -265,21 +266,31 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 	return nil
 }
 
+func (c *Component) sortedKeys() []string {
+	keys := make([]string, 0, len(c.records))
+	for k := range c.records {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func (c *Component) handleQuery(ctx context.Context, handler module.Handler, req QueryRequest) any {
 	var results []QueryResultItem
 
 	if req.Query == "" {
 		// Empty query: return all records
-		for key, data := range c.records {
+		for _, key := range c.sortedKeys() {
 			doc := Document{}
-			if err := json.Unmarshal(data, &doc); err != nil {
+			if err := json.Unmarshal(c.records[key], &doc); err != nil {
 				continue
 			}
 			results = append(results, QueryResultItem{Key: key, Document: doc})
 		}
 	} else {
 		// Evaluate JSONPath query against each record
-		for key, data := range c.records {
+		for _, key := range c.sortedKeys() {
+			data := c.records[key]
 			node, err := ajson.Unmarshal(data)
 			if err != nil {
 				continue
