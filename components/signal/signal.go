@@ -7,7 +7,6 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
-	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
@@ -40,20 +39,16 @@ type Component struct {
 	cancelFunc  context.CancelFunc
 }
 
-type Control struct {
-	Context     Context `json:"context" required:"true" title:"Context"`
-	Send        bool    `json:"send" format:"button" title:"Send" required:"true" colSpan:"col-span-6"`
-	Reset       bool    `json:"reset" format:"button" title:"Reset" required:"true" colSpan:"col-span-6"`
-	ResetEnable bool    `json:"-" jsonschema:"-"`
+// ControlStopped is the _control port schema when the signal is not running
+type ControlStopped struct {
+	Context Context `json:"context" required:"true" title:"Context"`
+	Send    bool    `json:"send" format:"button" title:"Send" required:"true"`
 }
 
-func (c Control) PrepareJSONSchema(schema *jsonschema.Schema) error {
-	if c.ResetEnable {
-		delete(schema.Properties, "send")
-		return nil
-	}
-	delete(schema.Properties, "reset")
-	return nil
+// ControlRunning is the _control port schema when the signal is running
+type ControlRunning struct {
+	Context Context `json:"context" required:"true" title:"Context" readonly:"true"`
+	Reset   bool    `json:"reset" format:"button" title:"Reset" required:"true"`
 }
 
 func (t *Component) Instance() module.Component {
@@ -172,20 +167,20 @@ func (t *Component) handleControl(ctx context.Context, handler module.Handler, m
 		return nil
 	}
 
-	in, ok := msg.(Control)
-	if !ok {
+	switch ctrl := msg.(type) {
+	case ControlRunning:
+		log.Info().Bool("reset", ctrl.Reset).Msg("signal component: ControlRunning parsed")
+		if ctrl.Reset {
+			return t.handleReset(handler)
+		}
+	case ControlStopped:
+		log.Info().Bool("send", ctrl.Send).Msg("signal component: ControlStopped parsed")
+		if ctrl.Send {
+			return t.handleSend(handler, ctrl.Context)
+		}
+	default:
 		log.Error().Str("msgType", fmt.Sprintf("%T", msg)).Msg("signal component: type assertion failed")
-		return fmt.Errorf("invalid input msg: expected Control, got %T", msg)
-	}
-
-	log.Info().Bool("send", in.Send).Bool("reset", in.Reset).Msg("signal component: Control parsed")
-
-	if in.Reset {
-		return t.handleReset(handler)
-	}
-
-	if in.Send {
-		return t.handleSend(handler, in.Context)
+		return fmt.Errorf("invalid input msg: expected ControlRunning or ControlStopped, got %T", msg)
 	}
 
 	return nil
@@ -281,6 +276,18 @@ func (t *Component) Ports() []module.Port {
 		controlContext = sentContext
 	}
 
+	var controlConfig interface{}
+	if isRunning {
+		controlConfig = ControlRunning{
+			Context: controlContext,
+			Reset:   true,
+		}
+	} else {
+		controlConfig = ControlStopped{
+			Context: controlContext,
+		}
+	}
+
 	return []module.Port{
 		{
 			Name: v1alpha1.ReconcilePort,
@@ -298,13 +305,10 @@ func (t *Component) Ports() []module.Port {
 			Configuration: new(Context),
 		},
 		{
-			Name:   v1alpha1.ControlPort,
-			Label:  "Control",
-			Source: true,
-			Configuration: Control{
-				Context:     controlContext,
-				ResetEnable: isRunning,
-			},
+			Name:          v1alpha1.ControlPort,
+			Label:         "Control",
+			Source:        true,
+			Configuration: controlConfig,
 		},
 	}
 }
