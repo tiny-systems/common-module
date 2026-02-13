@@ -9,7 +9,6 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/rs/zerolog/log"
-	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
@@ -57,23 +56,19 @@ func (t *Component) Instance() module.Component {
 	}
 }
 
-type Control struct {
+// ControlStopped is the _control port schema when the ticker is not running
+type ControlStopped struct {
 	Context Context `json:"context" required:"true" title:"Context"`
 	Status  string  `json:"status" title:"Status" readonly:"true"`
-	Stop    bool    `json:"stop" format:"button" title:"Stop" required:"true"`
 	Start   bool    `json:"start" format:"button" title:"Start" required:"true"`
 }
 
-func (c Control) PrepareJSONSchema(schema *jsonschema.Schema) error {
-	if c.Start {
-		delete(schema.Properties, "stop")
-	} else {
-		delete(schema.Properties, "start")
-	}
-	return nil
+// ControlRunning is the _control port schema when the ticker is running
+type ControlRunning struct {
+	Context Context `json:"context" required:"true" title:"Context" readonly:"true"`
+	Status  string  `json:"status" title:"Status" readonly:"true"`
+	Stop    bool    `json:"stop" format:"button" title:"Stop" required:"true"`
 }
-
-var _ jsonschema.Preparer = (*Control)(nil)
 
 func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
@@ -160,26 +155,24 @@ func (t *Component) handleControl(ctx context.Context, handler module.Handler, m
 		return nil
 	}
 
-	ctrl, ok := msg.(Control)
-	if !ok {
-		return nil
+	switch ctrl := msg.(type) {
+	case ControlRunning:
+		if ctrl.Stop {
+			t.settingsFromPort = false
+			t.clearMetadata(handler)
+			return t.stop()
+		}
+	case ControlStopped:
+		t.settings.Context = ctrl.Context
+		t.settingsFromPort = true
+		t.persistMetadata(handler)
+
+		if t.isRunning() {
+			return nil
+		}
+
+		go t.emit(context.Background(), handler)
 	}
-
-	if ctrl.Stop {
-		t.settingsFromPort = false
-		t.clearMetadata(handler)
-		return t.stop()
-	}
-
-	t.settings.Context = ctrl.Context
-	t.settingsFromPort = true
-	t.persistMetadata(handler)
-
-	if t.isRunning() {
-		return nil
-	}
-
-	go t.emit(context.Background(), handler)
 	return nil
 }
 
@@ -304,13 +297,13 @@ func (t *Component) Ports() []module.Port {
 
 func (t *Component) getControl() interface{} {
 	if t.isRunning() {
-		return Control{
+		return ControlRunning{
 			Status:  "Running",
 			Context: t.settings.Context,
 			Stop:    true,
 		}
 	}
-	return Control{
+	return ControlStopped{
 		Context: t.settings.Context,
 		Status:  "Not running",
 		Start:   true,
