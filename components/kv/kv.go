@@ -91,6 +91,12 @@ type QueryResult struct {
 	Query   string            `json:"query" title:"Query"`
 }
 
+// Control exposes the reset button on the _control port
+type Control struct {
+	Records int  `json:"records" title:"Records" readonly:"true"`
+	Reset   bool `json:"reset" format:"button" title:"Reset" required:"true"`
+}
+
 // Component implements a metadata-backed key-value store
 type Component struct {
 	mu        sync.RWMutex
@@ -119,6 +125,12 @@ func (c *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
+func (c *Component) getControl() Control {
+	return Control{
+		Records: len(c.records),
+	}
+}
+
 func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
 	switch port {
 	case v1alpha1.ReconcilePort:
@@ -130,6 +142,13 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 			return fmt.Errorf("invalid settings")
 		}
 		return c.handleSettings(in)
+
+	case v1alpha1.ControlPort:
+		in, ok := msg.(Control)
+		if !ok {
+			return fmt.Errorf("invalid control")
+		}
+		return c.handleControl(handler, in)
 
 	case StorePort:
 		in, ok := msg.(StoreRequest)
@@ -147,6 +166,34 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 	}
 
 	return fmt.Errorf("unknown port: %s", port)
+}
+
+func (c *Component) handleControl(handler module.Handler, in Control) error {
+	if !in.Reset {
+		return nil
+	}
+
+	c.mu.Lock()
+	c.records = make(map[string][]byte)
+	c.storeUsed = false
+	c.mu.Unlock()
+
+	// Remove all kv-* metadata keys
+	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		if n.Status.Metadata == nil {
+			return nil
+		}
+		for k := range n.Status.Metadata {
+			if strings.HasPrefix(k, metadataPrefix) {
+				delete(n.Status.Metadata, k)
+			}
+		}
+		return nil
+	})
+
+	// Update control port with new record count
+	_ = handler(context.Background(), v1alpha1.ControlPort, c.getControl())
+	return nil
 }
 
 func (c *Component) handleSettings(in Settings) error {
@@ -257,6 +304,9 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 		return fmt.Errorf("unknown operation: %s", req.Operation)
 	}
 
+	// Update control port with current record count
+	_ = handler(context.Background(), v1alpha1.ControlPort, c.getControl())
+
 	if enableAck {
 		return handler(ctx, StoreAckPort, StoreAck{
 			Context: req.Context,
@@ -336,6 +386,12 @@ func (c *Component) Ports() []module.Port {
 			Name:          v1alpha1.SettingsPort,
 			Label:         "Settings",
 			Configuration: settings,
+		},
+		{
+			Name:          v1alpha1.ControlPort,
+			Label:         "Control",
+			Source:        true,
+			Configuration: c.getControl(),
 		},
 		{
 			Name:  StorePort,
