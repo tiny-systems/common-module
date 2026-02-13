@@ -11,6 +11,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.19.0
 	github.com/swaggest/jsonschema-go v0.3.70
+	github.com/tiny-systems/ajson v0.1.6
 	github.com/tiny-systems/module v0.1.301
 	go.opentelemetry.io/otel/trace v1.39.0
 )
@@ -142,7 +143,6 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/swaggest/refl v1.3.0 // indirect
-	github.com/tiny-systems/ajson v0.1.6 // indirect
 	github.com/tiny-systems/errorpanic v0.7.1 // indirect
 	github.com/tiny-systems/otel-collector v0.5.1 // indirect
 	github.com/tiny-systems/platform-api v0.0.15 // indirect
