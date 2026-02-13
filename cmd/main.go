@@ -6,6 +6,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	_ "github.com/tiny-systems/common-module/components/arrayget"
 	_ "github.com/tiny-systems/common-module/components/async"
 	_ "github.com/tiny-systems/common-module/components/cron"
 	_ "github.com/tiny-systems/common-module/components/kv"
