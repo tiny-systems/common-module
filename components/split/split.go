@@ -18,13 +18,13 @@ type Context any
 type ItemContext any
 
 type InMessage struct {
-	Context Context       `json:"context" title:"Context" configurable:"true"  description:"Message to be send further with each item"  configurable:"true"`
-	Array   []ItemContext `json:"array" title:"Array" default:"null" description:"Array of items to be split" required:"true"`
+	Context Context       `json:"context" title:"Context" configurable:"true" description:"Message to be send further with each item"`
+	Array   []ItemContext `json:"array" title:"Array" default:"null" description:"Array of items to be split" required:"true" shared:"true"`
 }
 
 type OutMessage struct {
 	Context Context     `json:"context"`
-	Item    ItemContext `json:"item"`
+	Item    ItemContext `json:"item" shared:"true"`
 }
 
 type Component struct {
