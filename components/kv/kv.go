@@ -31,8 +31,10 @@ const (
 	maxRecordSizeBytes = 32 * 1024 // 32KB per record
 )
 
-// Context type alias for schema generation
-type Context any
+// Separate context types for schema propagation — platform matches by type name.
+// StoreContext flows through store → store_ack, QueryContext through query → query_result.
+type StoreContext any
+type QueryContext any
 
 // Document is the user-defined value structure
 type Document map[string]interface{}
@@ -60,21 +62,21 @@ type Settings struct {
 
 // StoreRequest is the input for store/delete operations
 type StoreRequest struct {
-	Context   Context  `json:"context,omitempty" configurable:"true" title:"Context"`
-	Operation string   `json:"operation" required:"true" enum:"store,delete" enumTitles:"Store,Delete" default:"store" title:"Operation"`
-	Document  Document `json:"document" required:"true" title:"Document" description:"Document to store or delete"`
+	Context   StoreContext `json:"context,omitempty" configurable:"true" title:"Context"`
+	Operation string       `json:"operation" required:"true" enum:"store,delete" enumTitles:"Store,Delete" default:"store" title:"Operation"`
+	Document  Document     `json:"document" required:"true" title:"Document" description:"Document to store or delete"`
 }
 
 // StoreAck acknowledges a store/delete operation
 type StoreAck struct {
-	Context Context      `json:"context,omitempty" title:"Context"`
+	Context StoreContext `json:"context,omitempty" title:"Context"`
 	Request StoreRequest `json:"request" title:"Request"`
 }
 
 // QueryRequest is the input for querying records
 type QueryRequest struct {
-	Context Context `json:"context,omitempty" configurable:"true" title:"Context"`
-	Query   string  `json:"query,omitempty" required:"true" title:"Query" description:"JSONPath expression evaluated against each record (e.g. $.status == 'DOWN')"`
+	Context QueryContext `json:"context,omitempty" configurable:"true" title:"Context"`
+	Query   string       `json:"query,omitempty" required:"true" title:"Query" description:"JSONPath expression evaluated against each record (e.g. $.status == 'DOWN')"`
 }
 
 // QueryResultItem is a single matched record
@@ -85,7 +87,7 @@ type QueryResultItem struct {
 
 // QueryResult returns all matching records
 type QueryResult struct {
-	Context Context           `json:"context,omitempty" title:"Context"`
+	Context QueryContext      `json:"context,omitempty" title:"Context"`
 	Results []QueryResultItem `json:"results" title:"Results"`
 	Count   int               `json:"count" title:"Count"`
 	Query   string            `json:"query" title:"Query"`
