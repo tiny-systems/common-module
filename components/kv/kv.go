@@ -64,7 +64,7 @@ type Settings struct {
 type StoreRequest struct {
 	Context   StoreContext `json:"context,omitempty" configurable:"true" title:"Context"`
 	Operation string       `json:"operation" required:"true" enum:"store,delete" enumTitles:"Store,Delete" default:"store" title:"Operation"`
-	Document  Document     `json:"document" required:"true" title:"Document" description:"Document to store or delete"`
+	Document  Document     `json:"document" required:"true" title:"Document" description:"Document to store or delete" configurable:"true"`
 }
 
 // StoreAck acknowledges a store/delete operation
@@ -82,7 +82,7 @@ type QueryRequest struct {
 // QueryResultItem is a single matched record
 type QueryResultItem struct {
 	Key      string   `json:"key" title:"Key"`
-	Document Document `json:"document" title:"Document"`
+	Document Document `json:"document" title:"Document" configurable:"true"`
 }
 
 // QueryResult returns all matching records
@@ -400,6 +400,7 @@ func (c *Component) Ports() []module.Port {
 			Label: "Store",
 			Configuration: StoreRequest{
 				Operation: OpStore,
+				Document:  settings.Document,
 			},
 			Position: module.Left,
 		},
@@ -412,21 +413,29 @@ func (c *Component) Ports() []module.Port {
 			Position: module.Left,
 		},
 		{
-			Name:          QueryResultPort,
-			Label:         "Query Result",
-			Source:        true,
-			Configuration: QueryResult{},
-			Position:      module.Right,
+			Name:   QueryResultPort,
+			Label:  "Query Result",
+			Source: true,
+			Configuration: QueryResult{
+				Results: []QueryResultItem{
+					{Document: settings.Document},
+				},
+			},
+			Position: module.Right,
 		},
 	}
 
 	if settings.EnableStoreAck {
 		ports = append(ports, module.Port{
-			Name:          StoreAckPort,
-			Label:         "Store Ack",
-			Source:        true,
-			Configuration: StoreAck{},
-			Position:      module.Right,
+			Name:   StoreAckPort,
+			Label:  "Store Ack",
+			Source: true,
+			Configuration: StoreAck{
+				Request: StoreRequest{
+					Document: settings.Document,
+				},
+			},
+			Position: module.Right,
 		})
 	}
 
