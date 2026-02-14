@@ -64,7 +64,7 @@ type Settings struct {
 type StoreRequest struct {
 	Context   StoreContext `json:"context,omitempty" configurable:"true" title:"Context"`
 	Operation string       `json:"operation" required:"true" enum:"store,delete" enumTitles:"Store,Delete" default:"store" title:"Operation"`
-	Document  Document     `json:"document" required:"true" title:"Document" description:"Document to store or delete" configurable:"true"`
+	Document  Document     `json:"document" required:"true" title:"Document" description:"Document to store or delete"`
 }
 
 // StoreAck acknowledges a store/delete operation
@@ -82,7 +82,7 @@ type QueryRequest struct {
 // QueryResultItem is a single matched record
 type QueryResultItem struct {
 	Key      string   `json:"key" title:"Key"`
-	Document Document `json:"document" title:"Document" configurable:"true"`
+	Document Document `json:"document" title:"Document"`
 }
 
 // QueryResult returns all matching records
