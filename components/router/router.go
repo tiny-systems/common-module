@@ -104,14 +104,18 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 	}
 
 	for _, condition := range in.Conditions {
-		if condition.Condition {
+		if !condition.Condition {
+			continue
+		}
+		if t.hasRoute(condition.RouteName.Value) {
 			return handler(ctx, getPortNameFromRoute(condition.RouteName.Value), in.Context)
 		}
+		break
 	}
-	if !t.settings.EnableDefaultPort {
-		return nil
+	if t.settings.EnableDefaultPort {
+		return handler(ctx, DefaultPort, in.Context)
 	}
-	return handler(ctx, DefaultPort, in.Context)
+	return fmt.Errorf("no matching route: %v", in.Conditions)
 }
 
 // Ports drop settings, make it port payload
@@ -161,6 +165,15 @@ func (t *Component) Ports() []module.Port {
 		})
 	}
 	return ports
+}
+
+func (t *Component) hasRoute(name string) bool {
+	for _, r := range t.settings.Routes {
+		if strings.EqualFold(r, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func getPortNameFromRoute(route string) string {
