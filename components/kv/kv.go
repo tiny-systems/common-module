@@ -177,7 +177,7 @@ func (c *Component) handleControl(handler module.Handler, in Control) error {
 
 	c.mu.Lock()
 	c.records = make(map[string][]byte)
-	c.storeUsed = false
+	c.storeUsed = true // keep guard active so reconcile won't reload stale metadata
 	c.mu.Unlock()
 
 	// Remove all kv-* metadata keys
