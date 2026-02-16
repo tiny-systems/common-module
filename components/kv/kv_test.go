@@ -298,6 +298,42 @@ func TestContextPassthrough(t *testing.T) {
 	}
 }
 
+func TestResetThenReconcileDoesNotRestore(t *testing.T) {
+	ctx := context.Background()
+	h := newKV()
+
+	// Store some records
+	storeDoc(t, h, kv.Document{"id": "ep1", "status": "UP"})
+	storeDoc(t, h, kv.Document{"id": "ep2", "status": "DOWN"})
+
+	// Verify 2 records
+	qr := queryAll(t, h)
+	if qr.Count != 2 {
+		t.Fatalf("before reset: got %d, want 2", qr.Count)
+	}
+
+	// Reset via control port
+	h.Reset()
+	h.Handle(ctx, "_control", kv.Control{Reset: true})
+
+	// Verify records cleared
+	qr = queryAll(t, h)
+	if qr.Count != 0 {
+		t.Fatalf("after reset: got %d, want 0", qr.Count)
+	}
+
+	// Simulate stale reconcile (metadata not yet patched in K8s)
+	h.Metadata["kv-ep1"] = `{"id":"ep1","status":"UP"}`
+	h.Metadata["kv-ep2"] = `{"id":"ep2","status":"DOWN"}`
+	h.Reconcile(ctx)
+
+	// Records should still be 0 — storeUsed guard prevents reload
+	qr = queryAll(t, h)
+	if qr.Count != 0 {
+		t.Fatalf("after stale reconcile: got %d, want 0", qr.Count)
+	}
+}
+
 func TestPodRestartMultipleKeys(t *testing.T) {
 	ctx := context.Background()
 	pod1 := newKV()
