@@ -12,7 +12,7 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/swaggest/jsonschema-go v0.3.70
 	github.com/tiny-systems/ajson v0.1.6
-	github.com/tiny-systems/module v0.1.335
+	github.com/tiny-systems/module v0.1.338
 	go.opentelemetry.io/otel/trace v1.39.0
 )
 
