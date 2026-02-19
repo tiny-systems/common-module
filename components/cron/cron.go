@@ -9,7 +9,6 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/robfig/cron/v3"
 	"github.com/rs/zerolog/log"
-	"github.com/swaggest/jsonschema-go"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
 	"github.com/tiny-systems/module/pkg/utils"
@@ -35,22 +34,21 @@ type Settings struct {
 	Schedule string  `json:"schedule" required:"true" title:"Schedule" description:"Cron expression (e.g., '*/5 * * * *' for every 5 minutes, '0 9 * * 1-5' for 9 AM on weekdays)" default:"*/1 * * * *"`
 }
 
-type Control struct {
+// ControlStopped is the _control port schema when the cron is not running
+type ControlStopped struct {
 	Context  Context `json:"context" required:"true" title:"Context"`
 	Schedule string  `json:"schedule" required:"true" title:"Schedule" description:"Cron expression"`
-	NextRun  string  `json:"nextRun" title:"Next Run" readonly:"true"`
 	Status   string  `json:"status" title:"Status" readonly:"true"`
-	Stop     bool    `json:"stop" format:"button" title:"Stop" required:"true"`
 	Start    bool    `json:"start" format:"button" title:"Start" required:"true"`
 }
 
-func (ctrl Control) PrepareJSONSchema(schema *jsonschema.Schema) error {
-	if ctrl.Start {
-		delete(schema.Properties, "stop")
-	} else {
-		delete(schema.Properties, "start")
-	}
-	return nil
+// ControlRunning is the _control port schema when the cron is running
+type ControlRunning struct {
+	Context  Context `json:"context" required:"true" title:"Context" readonly:"true"`
+	Schedule string  `json:"schedule" title:"Schedule" readonly:"true"`
+	NextRun  string  `json:"nextRun" title:"Next Run" readonly:"true"`
+	Status   string  `json:"status" title:"Status" readonly:"true"`
+	Stop     bool    `json:"stop" format:"button" title:"Stop" required:"true"`
 }
 
 type Component struct {
@@ -112,14 +110,20 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 		if !utils.IsLeader(ctx) {
 			return nil
 		}
-		ctrl, ok := msg.(Control)
-		if !ok {
-			return fmt.Errorf("invalid control message")
-		}
+		return c.handleControl(ctx, handler, msg)
+
+	default:
+		return fmt.Errorf("unknown port: %s", port)
+	}
+}
+
+func (c *Component) handleControl(_ context.Context, handler module.Handler, msg interface{}) error {
+	switch ctrl := msg.(type) {
+	case ControlRunning:
 		if ctrl.Stop {
 			return c.stop(handler)
 		}
-
+	case ControlStopped:
 		// Validate schedule before starting
 		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 		if _, err := parser.Parse(ctrl.Schedule); err != nil {
@@ -141,11 +145,8 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 
 		c.persistRunningState(handler)
 		go c.run(context.Background(), handler)
-		return nil
-
-	default:
-		return fmt.Errorf("unknown port: %s", port)
 	}
+	return nil
 }
 
 func (c *Component) handleReconcile(ctx context.Context, handler module.Handler, msg interface{}) error {
@@ -374,13 +375,13 @@ func (c *Component) Ports() []module.Port {
 	}
 }
 
-func (c *Component) control() Control {
+func (c *Component) control() interface{} {
 	if c.cancel != nil {
 		nextRun := ""
 		if !c.nextTick.IsZero() {
 			nextRun = c.nextTick.Format(time.RFC3339)
 		}
-		return Control{
+		return ControlRunning{
 			Status:   "Running",
 			Context:  c.settings.Context,
 			Schedule: c.settings.Schedule,
@@ -394,7 +395,7 @@ func (c *Component) control() Control {
 		status = c.lastError
 	}
 
-	return Control{
+	return ControlStopped{
 		Context:  c.settings.Context,
 		Schedule: c.settings.Schedule,
 		Status:   status,
@@ -402,10 +403,7 @@ func (c *Component) control() Control {
 	}
 }
 
-var (
-	_ module.Component    = (*Component)(nil)
-	_ jsonschema.Preparer = (*Control)(nil)
-)
+var _ module.Component = (*Component)(nil)
 
 func init() {
 	registry.Register((&Component{}).Instance())

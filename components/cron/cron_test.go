@@ -18,32 +18,32 @@ func newCron() *testharness.Harness {
 // startCron starts cron as leader and registers t.Cleanup to stop it.
 func startCron(t *testing.T, h *testharness.Harness, schedule string, cronCtx any) {
 	t.Helper()
-	h.HandleAsLeader(context.Background(), "_control", cron.Control{
+	h.HandleAsLeader(context.Background(), "_control", cron.ControlStopped{
 		Start:    true,
 		Schedule: schedule,
 		Context:  cronCtx,
 	})
 	time.Sleep(wait)
 	t.Cleanup(func() {
-		h.HandleAsLeader(context.Background(), "_control", cron.Control{Stop: true})
+		h.HandleAsLeader(context.Background(), "_control", cron.ControlRunning{Stop: true})
 		time.Sleep(wait)
 	})
 }
 
-func getControl(h *testharness.Harness) cron.Control {
+func getControlPort(h *testharness.Harness) any {
 	for _, p := range h.Ports() {
 		if p.Name == "_control" {
-			return p.Configuration.(cron.Control)
+			return p.Configuration
 		}
 	}
-	return cron.Control{}
+	return nil
 }
 
 func TestStartAndStop(t *testing.T) {
 	h := newCron()
 	ctx := context.Background()
 
-	h.HandleAsLeader(ctx, "_control", cron.Control{
+	h.HandleAsLeader(ctx, "_control", cron.ControlStopped{
 		Start:    true,
 		Schedule: "*/1 * * * *",
 		Context:  "test-payload",
@@ -58,7 +58,7 @@ func TestStartAndStop(t *testing.T) {
 	}
 
 	// Stop
-	h.HandleAsLeader(ctx, "_control", cron.Control{Stop: true})
+	h.HandleAsLeader(ctx, "_control", cron.ControlRunning{Stop: true})
 	time.Sleep(wait)
 
 	if _, ok := h.Metadata["cron-running"]; ok {
@@ -79,7 +79,7 @@ func TestInvalidSchedule(t *testing.T) {
 	h := newCron()
 	ctx := context.Background()
 
-	h.HandleAsLeader(ctx, "_control", cron.Control{
+	h.HandleAsLeader(ctx, "_control", cron.ControlStopped{
 		Start:    true,
 		Schedule: "not-a-cron",
 		Context:  "test",
@@ -98,7 +98,7 @@ func TestErrorClearedOnValidStart(t *testing.T) {
 	ctx := context.Background()
 
 	// Invalid → error set
-	h.HandleAsLeader(ctx, "_control", cron.Control{
+	h.HandleAsLeader(ctx, "_control", cron.ControlStopped{
 		Start:    true,
 		Schedule: "invalid",
 	})
@@ -119,7 +119,7 @@ func TestControlRequiresLeader(t *testing.T) {
 	ctx := context.Background()
 
 	// Non-leader start (Handle, not HandleAsLeader)
-	h.Handle(ctx, "_control", cron.Control{
+	h.Handle(ctx, "_control", cron.ControlStopped{
 		Start:    true,
 		Schedule: "*/1 * * * *",
 		Context:  "test",
@@ -146,7 +146,10 @@ func TestSettingsDeliveryNotRunning(t *testing.T) {
 	}
 
 	// Settings stored internally (visible via Ports)
-	ctrl := getControl(h)
+	ctrl, ok := getControlPort(h).(cron.ControlStopped)
+	if !ok {
+		t.Fatal("expected ControlStopped when not running")
+	}
 	if ctrl.Schedule != "*/5 * * * *" {
 		t.Errorf("control schedule: got %q, want */5 * * * *", ctrl.Schedule)
 	}
@@ -184,11 +187,14 @@ func TestPodRestartResumesAsLeader(t *testing.T) {
 	pod2.ReconcileAsLeader(ctx)
 	time.Sleep(wait)
 	t.Cleanup(func() {
-		pod2.HandleAsLeader(ctx, "_control", cron.Control{Stop: true})
+		pod2.HandleAsLeader(ctx, "_control", cron.ControlRunning{Stop: true})
 		time.Sleep(wait)
 	})
 
-	ctrl := getControl(pod2)
+	ctrl, ok := getControlPort(pod2).(cron.ControlRunning)
+	if !ok {
+		t.Fatal("expected ControlRunning after restart")
+	}
 	if ctrl.Status != "Running" {
 		t.Errorf("pod2 status: got %q, want Running", ctrl.Status)
 	}
@@ -208,7 +214,10 @@ func TestPodRestartDoesNotResumeAsNonLeader(t *testing.T) {
 	pod2.Reconcile(ctx)
 	time.Sleep(wait)
 
-	ctrl := getControl(pod2)
+	ctrl, ok := getControlPort(pod2).(cron.ControlStopped)
+	if !ok {
+		t.Fatal("expected ControlStopped for non-leader pod")
+	}
 	if ctrl.Status == "Running" {
 		t.Error("non-leader pod should not resume cron")
 	}
@@ -229,7 +238,10 @@ func TestStaleReconcileDoesNotOverwriteFreshSettings(t *testing.T) {
 	h.Metadata["cron-context"] = `"stale"`
 	h.Reconcile(ctx)
 
-	ctrl := getControl(h)
+	ctrl, ok := getControlPort(h).(cron.ControlStopped)
+	if !ok {
+		t.Fatal("expected ControlStopped")
+	}
 	if ctrl.Schedule != "*/5 * * * *" {
 		t.Errorf("stale reconcile overwrote schedule: got %q, want */5 * * * *", ctrl.Schedule)
 	}
@@ -238,12 +250,12 @@ func TestStaleReconcileDoesNotOverwriteFreshSettings(t *testing.T) {
 func TestPortsShowStartWhenStopped(t *testing.T) {
 	h := newCron()
 
-	ctrl := getControl(h)
+	ctrl, ok := getControlPort(h).(cron.ControlStopped)
+	if !ok {
+		t.Fatal("expected ControlStopped when not running")
+	}
 	if !ctrl.Start {
 		t.Error("should show Start when stopped")
-	}
-	if ctrl.Stop {
-		t.Error("should not show Stop when stopped")
 	}
 	if ctrl.Status != "Not running" {
 		t.Errorf("status: got %q, want 'Not running'", ctrl.Status)
@@ -254,9 +266,9 @@ func TestPortsShowStopWhenRunning(t *testing.T) {
 	h := newCron()
 	startCron(t, h, "*/1 * * * *", "test")
 
-	ctrl := getControl(h)
-	if ctrl.Start {
-		t.Error("should not show Start when running")
+	ctrl, ok := getControlPort(h).(cron.ControlRunning)
+	if !ok {
+		t.Fatal("expected ControlRunning when running")
 	}
 	if !ctrl.Stop {
 		t.Error("should show Stop when running")
@@ -273,7 +285,7 @@ func TestStopWhileNotRunning(t *testing.T) {
 	h := newCron()
 	ctx := context.Background()
 
-	result := h.HandleAsLeader(ctx, "_control", cron.Control{Stop: true})
+	result := h.HandleAsLeader(ctx, "_control", cron.ControlRunning{Stop: true})
 	if result != nil {
 		t.Errorf("stop while not running returned: %v", result)
 	}
@@ -304,11 +316,14 @@ func TestPodRestartRestoresContext(t *testing.T) {
 	pod2.ReconcileAsLeader(ctx)
 	time.Sleep(wait)
 	t.Cleanup(func() {
-		pod2.HandleAsLeader(ctx, "_control", cron.Control{Stop: true})
+		pod2.HandleAsLeader(ctx, "_control", cron.ControlRunning{Stop: true})
 		time.Sleep(wait)
 	})
 
-	ctrl := getControl(pod2)
+	ctrl, ok := getControlPort(pod2).(cron.ControlRunning)
+	if !ok {
+		t.Fatal("expected ControlRunning after restart")
+	}
 	ctxMap, ok := ctrl.Context.(map[string]any)
 	if !ok {
 		t.Fatalf("context not a map: %T", ctrl.Context)
@@ -334,7 +349,10 @@ func TestSettingsFromPortGuard(t *testing.T) {
 	// Reconcile should not overwrite (settingsFromPort=true)
 	h.Reconcile(ctx)
 
-	ctrl := getControl(h)
+	ctrl, ok := getControlPort(h).(cron.ControlRunning)
+	if !ok {
+		t.Fatal("expected ControlRunning")
+	}
 	if ctrl.Schedule != "*/1 * * * *" {
 		t.Errorf("reconcile overwrote schedule: got %q, want */1 * * * *", ctrl.Schedule)
 	}
