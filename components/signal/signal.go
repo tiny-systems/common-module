@@ -30,13 +30,14 @@ type Settings struct {
 }
 
 type Component struct {
-	settings    Settings
-	nodeName    string
-	handler     module.Handler
-	mu          sync.Mutex // protects isRunning, sentContext, cancelFunc
-	isRunning   bool
-	sentContext Context
-	cancelFunc  context.CancelFunc
+	settings         Settings
+	settingsFromPort bool // prevents reconcile from restoring stale metadata
+	nodeName         string
+	handler          module.Handler
+	mu               sync.Mutex // protects isRunning, sentContext, cancelFunc
+	isRunning        bool
+	sentContext      Context
+	cancelFunc       context.CancelFunc
 }
 
 // ControlStopped is the _control port schema when the signal is not running
@@ -95,6 +96,9 @@ func (t *Component) handleReconcile(ctx context.Context, handler module.Handler,
 func (t *Component) restoreContextFromMetadata(metadata map[string]string) {
 	if metadata == nil {
 		return
+	}
+	if t.settingsFromPort {
+		return // settings are fresher than metadata
 	}
 
 	ctxStr, ok := metadata[metadataKeyContext]
@@ -260,6 +264,12 @@ func (t *Component) handleSettings(msg interface{}) error {
 		return fmt.Errorf("invalid settings")
 	}
 	t.settings = in
+	t.settingsFromPort = true
+	t.mu.Lock()
+	if !t.isRunning {
+		t.sentContext = nil
+	}
+	t.mu.Unlock()
 	return nil
 }
 
