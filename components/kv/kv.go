@@ -128,8 +128,11 @@ func (c *Component) GetInfo() module.ComponentInfo {
 }
 
 func (c *Component) getControl() Control {
+	c.mu.RLock()
+	n := len(c.records)
+	c.mu.RUnlock()
 	return Control{
-		Records: len(c.records),
+		Records: n,
 	}
 }
 
@@ -235,6 +238,7 @@ func (c *Component) handleReconcile(msg any) error {
 		return nil
 	}
 
+	c.mu.Lock()
 	for k, v := range node.Status.Metadata {
 		if !strings.HasPrefix(k, metadataPrefix) {
 			continue
@@ -242,6 +246,7 @@ func (c *Component) handleReconcile(msg any) error {
 		key := k[len(metadataPrefix):]
 		c.records[key] = []byte(v)
 	}
+	c.mu.Unlock()
 	return nil
 }
 
@@ -264,10 +269,6 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 		return fmt.Errorf("primary key cannot be empty")
 	}
 
-	c.mu.Lock()
-	c.storeUsed = true
-	c.mu.Unlock()
-
 	metaKey := metadataPrefix + pkStr
 
 	switch req.Operation {
@@ -279,12 +280,17 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 		if len(data) > maxRecordSizeBytes {
 			return fmt.Errorf("document too large: %d bytes (max %d)", len(data), maxRecordSizeBytes)
 		}
+
+		c.mu.Lock()
+		c.storeUsed = true
 		// Check capacity (allow update of existing key)
 		if _, exists := c.records[pkStr]; !exists && len(c.records) >= maxRecords {
+			c.mu.Unlock()
 			return fmt.Errorf("store full: %d records (max %d)", len(c.records), maxRecords)
 		}
-
 		c.records[pkStr] = data
+		c.mu.Unlock()
+
 		_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 			if n.Status.Metadata == nil {
 				n.Status.Metadata = make(map[string]string)
@@ -294,7 +300,11 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 		})
 
 	case OpDelete:
+		c.mu.Lock()
+		c.storeUsed = true
 		delete(c.records, pkStr)
+		c.mu.Unlock()
+
 		_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 			if n.Status.Metadata != nil {
 				delete(n.Status.Metadata, metaKey)
@@ -328,6 +338,7 @@ func (c *Component) sortedKeys() []string {
 }
 
 func (c *Component) handleQuery(ctx context.Context, handler module.Handler, req QueryRequest) any {
+	c.mu.RLock()
 	var results []QueryResultItem
 
 	if req.Query == "" {
@@ -364,6 +375,7 @@ func (c *Component) handleQuery(ctx context.Context, handler module.Handler, req
 			}
 		}
 	}
+	c.mu.RUnlock()
 
 	if results == nil {
 		results = []QueryResultItem{}
