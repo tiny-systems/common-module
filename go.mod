@@ -1,8 +1,8 @@
 module github.com/tiny-systems/common-module
 
-go 1.24.2
+go 1.25.0
 
-toolchain go1.24.9
+toolchain go1.25.5
 
 require (
 	github.com/goccy/go-json v0.10.2
@@ -12,7 +12,7 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/swaggest/jsonschema-go v0.3.70
 	github.com/tiny-systems/ajson v0.1.6
-	github.com/tiny-systems/module v0.1.346
+	github.com/tiny-systems/module v0.1.357
 	go.opentelemetry.io/otel/trace v1.39.0
 )
 
