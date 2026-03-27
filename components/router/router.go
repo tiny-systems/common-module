@@ -83,7 +83,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Router",
-		Info:        "Conditional message router. Configure routes via settings (e.g., routes=[\"POST\", \"OTHER\"]). Output ports are named out_<lowercase(route)> (e.g., out_post, out_other). Input: context (data to forward) + conditions array (each with route name and boolean). Routes context to FIRST condition where condition=true. If NO condition is true: with enableDefaultPort=true, routes to 'default' port (use for else/fallback logic); with enableDefaultPort=false, message is dropped.",
+		Info:        "Conditional message router. Configure routes via settings (e.g., routes=[\"POST\", \"OTHER\"]). Output ports are named out_<lowercase(route)> (e.g., out_post, out_other). Input: context (data to forward) + conditions array (each with route name and boolean). Routes context to FIRST condition where condition=true. If NO condition is true: with enableDefaultPort=true, routes to 'default' port (leave unwired to silently drop); with enableDefaultPort=false, returns an error to the caller. Prefer enableDefaultPort=true when unmatched messages should be ignored.",
 		Tags:        []string{"SDK"},
 	}
 }
