@@ -270,7 +270,9 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 		data := c.settings.Context
 		c.mu.Unlock()
 
-		handler(ctx, OutPort, data)
+		if err := utils.CheckForError(handler(ctx, OutPort, data)); err != nil {
+			log.Warn().Err(err).Msg("cron: downstream error on out port")
+		}
 
 		if ctx.Err() != nil {
 			return nil

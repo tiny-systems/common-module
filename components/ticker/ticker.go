@@ -209,7 +209,9 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 	for {
 		select {
 		case <-timer.C:
-			_ = handler(trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{})), OutPort, t.settings.Context)
+			if err := utils.CheckForError(handler(trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{})), OutPort, t.settings.Context)); err != nil {
+				log.Warn().Err(err).Msg("ticker: downstream error on out port")
+			}
 			timer.Reset(time.Duration(t.settings.Delay) * time.Millisecond)
 
 		case <-runCtx.Done():
