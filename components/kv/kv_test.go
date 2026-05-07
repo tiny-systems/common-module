@@ -2,6 +2,7 @@ package kv_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -9,6 +10,12 @@ import (
 	"github.com/tiny-systems/common-module/components/kv"
 	"github.com/tiny-systems/common-module/internal/testharness"
 )
+
+// stateKey returns the metadata key the State backend uses for the given
+// kv primary key. State stores values under "_state/<key>" base64-encoded.
+const stateKeyPrefix = "_state/"
+
+func stateKey(k string) string { return stateKeyPrefix + k }
 
 func newKV() *testharness.Harness {
 	return testharness.New((&kv.Component{}).Instance())
@@ -93,12 +100,16 @@ func TestMetadataPersistence(t *testing.T) {
 	h := newKV()
 	storeDoc(t, h, kv.Document{"id": "ep1", "status": "UP"})
 
-	raw, ok := h.Metadata["kv-ep1"]
+	encoded, ok := h.Metadata[stateKey("ep1")]
 	if !ok {
-		t.Fatal("kv-ep1 not in metadata")
+		t.Fatalf("%s not in metadata; have: %+v", stateKey("ep1"), h.Metadata)
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("metadata value not base64: %v", err)
 	}
 	var doc map[string]any
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("unmarshal metadata: %v", err)
 	}
 	if doc["status"] != "UP" {
@@ -115,8 +126,8 @@ func TestDeleteRemovesMetadata(t *testing.T) {
 		Document:  kv.Document{"id": "ep1"},
 	})
 
-	if _, ok := h.Metadata["kv-ep1"]; ok {
-		t.Error("kv-ep1 should be removed from metadata after delete")
+	if _, ok := h.Metadata[stateKey("ep1")]; ok {
+		t.Errorf("%s should be removed from metadata after delete", stateKey("ep1"))
 	}
 }
 

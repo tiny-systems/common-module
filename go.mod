@@ -12,8 +12,10 @@ require (
 	github.com/spf13/viper v1.20.1
 	github.com/swaggest/jsonschema-go v0.3.79
 	github.com/tiny-systems/ajson v0.1.6
-	github.com/tiny-systems/module v0.2.0
+	github.com/tiny-systems/module v0.3.0
 	go.opentelemetry.io/otel/trace v1.39.0
+	k8s.io/apimachinery v0.34.0
+	sigs.k8s.io/controller-runtime v0.20.2
 )
 
 require (
@@ -187,7 +189,6 @@ require (
 	helm.sh/helm/v3 v3.19.0 // indirect
 	k8s.io/api v0.34.0 // indirect
 	k8s.io/apiextensions-apiserver v0.34.0 // indirect
-	k8s.io/apimachinery v0.34.0 // indirect
 	k8s.io/apiserver v0.34.0 // indirect
 	k8s.io/cli-runtime v0.34.0 // indirect
 	k8s.io/client-go v0.34.0 // indirect
@@ -197,7 +198,6 @@ require (
 	k8s.io/kubectl v0.34.0 // indirect
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397 // indirect
 	oras.land/oras-go/v2 v2.6.0 // indirect
-	sigs.k8s.io/controller-runtime v0.20.2 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/kustomize/api v0.20.1 // indirect
 	sigs.k8s.io/kustomize/kyaml v0.20.1 // indirect

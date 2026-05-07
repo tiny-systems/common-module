@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 	"sync"
 
 	"github.com/swaggest/jsonschema-go"
@@ -26,7 +24,6 @@ const (
 	OpStore  = "store"
 	OpDelete = "delete"
 
-	metadataPrefix     = "kv-"
 	defaultMaxRecords  = 100
 	maxRecordSizeBytes = 32 * 1024 // 32KB per record
 )
@@ -99,14 +96,18 @@ type Control struct {
 	Reset   bool `json:"reset" format:"button" title:"Reset" required:"true"`
 }
 
-// Component implements a metadata-backed key-value store
+// Component implements a metadata-backed key-value store on top of
+// module.State. State reads through the controller-runtime cache and
+// writes via the reconcile-port debouncer, so all replicas of common-module
+// see identical kv contents (cache is shared via watch).
+//
+// No local records map and no storeUsed flag are needed — those existed
+// to manage in-memory-vs-metadata divergence which State eliminates.
 type Component struct {
 	module.Base
 
-	mu        sync.RWMutex
-	settings  Settings
-	records   map[string][]byte
-	storeUsed bool
+	mu       sync.RWMutex
+	settings Settings
 }
 
 func (c *Component) Instance() module.Component {
@@ -116,7 +117,6 @@ func (c *Component) Instance() module.Component {
 			MaxRecords: defaultMaxRecords,
 			Document:   Document{"id": "ID"},
 		},
-		records: make(map[string][]byte),
 	}
 }
 
@@ -124,18 +124,24 @@ func (c *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Key-Value Store",
-		Info:        "Key-value store backed by TinyNode metadata. Stores documents with a configurable schema and primary key. Supports JSONPath queries. Persistence is best-effort: writes are debounced (1s) before patching K8s, so data may be lost on pod crash within that window. Multi-pod safe via leader-reader pattern but eventually consistent. Best suited for state that gets periodically refreshed.",
+		Info:        "Key-value store backed by TinyNode metadata via the SDK State primitive. Stores documents with a configurable schema and primary key. Supports JSONPath queries. Multi-replica safe — all common-module replicas observe the same store via the K8s watch.",
 		Tags:        []string{"KV", "Storage", "Data"},
 	}
 }
 
-func (c *Component) getControl() Control {
-	c.mu.RLock()
-	n := len(c.records)
-	c.mu.RUnlock()
-	return Control{
-		Records: n,
+func (c *Component) recordCount(ctx context.Context) int {
+	if c.State() == nil {
+		return 0
 	}
+	keys, err := c.State().List(ctx, "")
+	if err != nil {
+		return 0
+	}
+	return len(keys)
+}
+
+func (c *Component) getControl(ctx context.Context) Control {
+	return Control{Records: c.recordCount(ctx)}
 }
 
 // OnSettings receives Settings from the SettingsPort.
@@ -162,32 +168,14 @@ func (c *Component) OnSettings(_ context.Context, msg any) error {
 	return nil
 }
 
-// OnReconcile rebuilds the in-memory record cache from metadata, unless
-// the local store has been used since startup (storeUsed guard).
-func (c *Component) OnReconcile(_ context.Context, node v1alpha1.TinyNode) error {
-	if node.Status.Metadata == nil {
-		return nil
-	}
-	c.mu.RLock()
-	skip := c.storeUsed
-	c.mu.RUnlock()
-	if skip {
-		return nil
-	}
-	c.mu.Lock()
-	for k, v := range node.Status.Metadata {
-		if !strings.HasPrefix(k, metadataPrefix) {
-			continue
-		}
-		key := k[len(metadataPrefix):]
-		c.records[key] = []byte(v)
-	}
-	c.mu.Unlock()
+// OnReconcile is a no-op: State backend handles cache freshness automatically.
+func (c *Component) OnReconcile(_ context.Context, _ v1alpha1.TinyNode) error {
 	return nil
 }
 
-// OnControl handles the Reset button on the dashboard.
-func (c *Component) OnControl(_ context.Context, msg any) error {
+// OnControl handles the Reset button on the dashboard. Deletes every key
+// in the State store and pushes an updated Control to the dashboard.
+func (c *Component) OnControl(ctx context.Context, msg any) error {
 	in, ok := msg.(Control)
 	if !ok {
 		return fmt.Errorf("invalid control")
@@ -196,26 +184,19 @@ func (c *Component) OnControl(_ context.Context, msg any) error {
 		return nil
 	}
 
-	c.mu.Lock()
-	c.records = make(map[string][]byte)
-	c.storeUsed = true // keep guard active so reconcile won't reload stale metadata
-	c.mu.Unlock()
-
-	// Remove all kv-* metadata keys
-	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
-		if n.Status.Metadata == nil {
-			return nil
+	if c.State() != nil {
+		keys, err := c.State().List(ctx, "")
+		if err != nil {
+			return fmt.Errorf("list keys for reset: %v", err)
 		}
-		for k := range n.Status.Metadata {
-			if strings.HasPrefix(k, metadataPrefix) {
-				delete(n.Status.Metadata, k)
+		for _, k := range keys {
+			if err := c.State().Delete(ctx, k); err != nil {
+				return fmt.Errorf("delete %q during reset: %v", k, err)
 			}
 		}
-		return nil
-	})
+	}
 
-	// Update control port with new record count
-	_ = c.Emit(context.Background(), v1alpha1.ControlPort, c.getControl())
+	_ = c.Emit(context.Background(), v1alpha1.ControlPort, c.getControl(ctx))
 	return nil
 }
 
@@ -259,7 +240,9 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 		return fmt.Errorf("primary key cannot be empty")
 	}
 
-	metaKey := metadataPrefix + pkStr
+	if c.State() == nil {
+		return fmt.Errorf("state backend not available")
+	}
 
 	switch req.Operation {
 	case OpStore:
@@ -271,43 +254,28 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 			return fmt.Errorf("document too large: %d bytes (max %d)", len(data), maxRecordSizeBytes)
 		}
 
-		c.mu.Lock()
-		c.storeUsed = true
-		// Check capacity (allow update of existing key)
-		if _, exists := c.records[pkStr]; !exists && len(c.records) >= maxRecords {
-			c.mu.Unlock()
-			return fmt.Errorf("store full: %d records (max %d)", len(c.records), maxRecords)
-		}
-		c.records[pkStr] = data
-		c.mu.Unlock()
-
-		_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
-			if n.Status.Metadata == nil {
-				n.Status.Metadata = make(map[string]string)
+		// Capacity check (allow update of existing key)
+		if _, exists, _ := c.State().Get(ctx, pkStr); !exists {
+			keys, _ := c.State().List(ctx, "")
+			if len(keys) >= maxRecords {
+				return fmt.Errorf("store full: %d records (max %d)", len(keys), maxRecords)
 			}
-			n.Status.Metadata[metaKey] = string(data)
-			return nil
-		})
+		}
+
+		if err := c.State().Set(ctx, pkStr, data); err != nil {
+			return fmt.Errorf("state.Set: %v", err)
+		}
 
 	case OpDelete:
-		c.mu.Lock()
-		c.storeUsed = true
-		delete(c.records, pkStr)
-		c.mu.Unlock()
-
-		_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
-			if n.Status.Metadata != nil {
-				delete(n.Status.Metadata, metaKey)
-			}
-			return nil
-		})
+		if err := c.State().Delete(ctx, pkStr); err != nil {
+			return fmt.Errorf("state.Delete: %v", err)
+		}
 
 	default:
 		return fmt.Errorf("unknown operation: %s", req.Operation)
 	}
 
-	// Update control port with current record count
-	_ = c.Emit(context.Background(), v1alpha1.ControlPort, c.getControl())
+	_ = c.Emit(context.Background(), v1alpha1.ControlPort, c.getControl(ctx))
 
 	if enableAck {
 		return handler(ctx, StoreAckPort, StoreAck{
@@ -318,54 +286,52 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 	return nil
 }
 
-func (c *Component) sortedKeys() []string {
-	keys := make([]string, 0, len(c.records))
-	for k := range c.records {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 func (c *Component) handleQuery(ctx context.Context, handler module.Handler, req QueryRequest) any {
-	c.mu.RLock()
+	if c.State() == nil {
+		return fmt.Errorf("state backend not available")
+	}
+
+	keys, err := c.State().List(ctx, "")
+	if err != nil {
+		return fmt.Errorf("list keys: %v", err)
+	}
+
 	var results []QueryResultItem
 
-	if req.Query == "" {
-		// Empty query: return all records
-		for _, key := range c.sortedKeys() {
+	for _, key := range keys {
+		data, found, err := c.State().Get(ctx, key)
+		if err != nil || !found {
+			continue
+		}
+		if req.Query == "" {
 			doc := Document{}
-			if err := json.Unmarshal(c.records[key], &doc); err != nil {
+			if err := json.Unmarshal(data, &doc); err != nil {
+				continue
+			}
+			results = append(results, QueryResultItem{Key: key, Document: doc})
+			continue
+		}
+		// Evaluate JSONPath query against the stored document
+		node, err := ajson.Unmarshal(data)
+		if err != nil {
+			continue
+		}
+		result, err := ajson.Eval(node, req.Query)
+		if err != nil {
+			continue
+		}
+		v, err := result.Unpack()
+		if err != nil {
+			continue
+		}
+		if v == true {
+			doc := Document{}
+			if err = json.Unmarshal(data, &doc); err != nil {
 				continue
 			}
 			results = append(results, QueryResultItem{Key: key, Document: doc})
 		}
-	} else {
-		// Evaluate JSONPath query against each record
-		for _, key := range c.sortedKeys() {
-			data := c.records[key]
-			node, err := ajson.Unmarshal(data)
-			if err != nil {
-				continue
-			}
-			result, err := ajson.Eval(node, req.Query)
-			if err != nil {
-				continue
-			}
-			v, err := result.Unpack()
-			if err != nil {
-				continue
-			}
-			if v == true {
-				doc := Document{}
-				if err = json.Unmarshal(data, &doc); err != nil {
-					continue
-				}
-				results = append(results, QueryResultItem{Key: key, Document: doc})
-			}
-		}
 	}
-	c.mu.RUnlock()
 
 	if results == nil {
 		results = []QueryResultItem{}
@@ -395,7 +361,7 @@ func (c *Component) Ports() []module.Port {
 			Name:          v1alpha1.ControlPort,
 			Label:         "Control",
 			Source:        true,
-			Configuration: c.getControl(),
+			Configuration: c.getControl(context.Background()),
 		},
 		{
 			Name:  StorePort,

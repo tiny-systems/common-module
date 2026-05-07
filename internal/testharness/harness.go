@@ -6,7 +6,12 @@ import (
 
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/state"
 	"github.com/tiny-systems/module/pkg/utils"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 // PortMsg captures a single output sent by a component via handler()
@@ -15,6 +20,13 @@ type PortMsg struct {
 	Data any
 }
 
+// nodeName/Namespace used by the harness's fake client. Tests don't need
+// to care; State scopes to this constant pair internally.
+const (
+	harnessNodeName  = "test-node"
+	harnessNamespace = "default"
+)
+
 // Harness wraps a component for testing.
 // Captures all port outputs and manages metadata persistence.
 type Harness struct {
@@ -22,26 +34,50 @@ type Harness struct {
 	mu        sync.Mutex
 	Metadata  map[string]string
 	Outputs   []PortMsg
+
+	// k8sClient backs the State primitive. Reads of TinyNode go through it;
+	// updates to status.metadata are mirrored from h.Handler's reconcile
+	// updaters into the fake client.
+	k8sClient client.Client
 }
 
 // New creates a harness for the given component instance. The harness
 // mirrors the scheduler's capability injection so components written
 // against the new lifecycle interfaces (OnSettings, OnReconcile, OnControl,
-// OnEmitter, etc.) work in tests the same way they do in the runner.
+// OnEmitter, OnState, etc.) work in tests the same way they do in the runner.
 func New(c module.Component) *Harness {
+	scheme := runtime.NewScheme()
+	_ = v1alpha1.AddToScheme(scheme)
+	node := &v1alpha1.TinyNode{}
+	node.Name = harnessNodeName
+	node.Namespace = harnessNamespace
+	node.Status.Metadata = map[string]string{}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(node).
+		WithStatusSubresource(&v1alpha1.TinyNode{}).
+		Build()
+
 	h := &Harness{
 		component: c,
 		Metadata:  map[string]string{},
+		k8sClient: cl,
 	}
-	// Inject the long-lived emit handler for components that need to publish
-	// from goroutines or system-port handlers.
 	if e, ok := c.(module.EmitterAware); ok {
 		e.OnEmitter(h.Handler)
+	}
+	if s, ok := c.(module.Stateful); ok {
+		s.OnState(state.NewMetadataState(h.k8sClient,
+			types.NamespacedName{Name: harnessNodeName, Namespace: harnessNamespace},
+			h.Handler,
+		))
 	}
 	return h
 }
 
 // Handler implements module.Handler, capturing outputs and metadata writes.
+// Reconcile-port updaters are applied to both h.Metadata (legacy hand-rolled
+// access) and the fake K8s client (so State.Get sees them).
 func (h *Harness) Handler(ctx context.Context, port string, data any) any {
 	if port == v1alpha1.ReconcilePort {
 		if fn, ok := data.(func(*v1alpha1.TinyNode) error); ok {
@@ -55,6 +91,16 @@ func (h *Harness) Handler(ctx context.Context, port string, data any) any {
 			}
 			h.Metadata = node.Status.Metadata
 			h.mu.Unlock()
+
+			// Mirror into the fake client so State reads see it.
+			if h.k8sClient != nil {
+				key := types.NamespacedName{Name: harnessNodeName, Namespace: harnessNamespace}
+				var live v1alpha1.TinyNode
+				if err := h.k8sClient.Get(ctx, key, &live); err == nil {
+					live.Status.Metadata = h.Metadata
+					_ = h.k8sClient.Status().Update(ctx, &live)
+				}
+			}
 		}
 		return nil
 	}
@@ -146,18 +192,38 @@ func (h *Harness) dispatch(ctx context.Context, port string, msg any) any {
 }
 
 // NewPod simulates a pod restart: fresh component instance, same metadata.
-// Reinjects EmitterAware on the new instance so it can publish from
-// background loops just like a freshly scheduled runner would.
+// Reinjects all SDK capabilities on the new instance so it behaves like a
+// freshly scheduled runner.
 func (h *Harness) NewPod() *Harness {
 	h.mu.Lock()
 	meta := copyMap(h.Metadata)
 	h.mu.Unlock()
+
+	scheme := runtime.NewScheme()
+	_ = v1alpha1.AddToScheme(scheme)
+	node := &v1alpha1.TinyNode{}
+	node.Name = harnessNodeName
+	node.Namespace = harnessNamespace
+	node.Status.Metadata = copyMap(meta)
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(node).
+		WithStatusSubresource(&v1alpha1.TinyNode{}).
+		Build()
+
 	pod := &Harness{
 		component: h.component.Instance(),
 		Metadata:  meta,
+		k8sClient: cl,
 	}
 	if e, ok := pod.component.(module.EmitterAware); ok {
 		e.OnEmitter(pod.Handler)
+	}
+	if s, ok := pod.component.(module.Stateful); ok {
+		s.OnState(state.NewMetadataState(pod.k8sClient,
+			types.NamespacedName{Name: harnessNodeName, Namespace: harnessNamespace},
+			pod.Handler,
+		))
 	}
 	return pod
 }
