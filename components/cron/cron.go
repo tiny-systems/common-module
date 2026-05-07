@@ -52,14 +52,21 @@ type ControlRunning struct {
 }
 
 type Component struct {
+	module.Base
+
 	mu       sync.Mutex
 	settings Settings
 	cancel   context.CancelFunc
 	nextTick time.Time
-	handler  module.Handler
 
-	// settingsFromPort is set when _settings or _control port provides values.
-	// When true, _reconcile skips metadata restore to avoid overwriting fresh values.
+	// settingsFromPort tracks whether OnSettings or OnControl has provided
+	// fresh values since the runner started. Reconcile uses this to decide
+	// whether stale metadata should be allowed to overwrite in-memory state.
+	//
+	// Why: framework only guarantees Reconcile-then-Settings ordering inside
+	// a single Update cycle. Settings can also arrive via a standalone port
+	// signal between cycles; a subsequent reconcile would otherwise restore
+	// from stale metadata and undo the fresh user input.
 	settingsFromPort bool
 
 	lastError string
@@ -81,47 +88,48 @@ func (c *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
-	c.handler = handler
-
-	switch port {
-	case v1alpha1.ReconcilePort:
-		return c.handleReconcile(ctx, handler, msg)
-
-	case v1alpha1.SettingsPort:
-		in, ok := msg.(Settings)
-		if !ok {
-			return fmt.Errorf("invalid settings")
-		}
-		c.mu.Lock()
-		c.settings = in
-		c.settingsFromPort = true
-		isRunning := c.cancel != nil
-		c.mu.Unlock()
-		if isRunning {
-			c.persistRunningState(handler)
-		}
-		return nil
-
-	case v1alpha1.ControlPort:
-		if msg == nil {
-			return nil
-		}
-		if !utils.IsLeader(ctx) {
-			return nil
-		}
-		return c.handleControl(ctx, handler, msg)
-
-	default:
-		return fmt.Errorf("unknown port: %s", port)
+// OnSettings receives settings from SettingsPort. Marks settingsFromPort
+// so any later reconcile won't restore stale metadata over fresh values.
+func (c *Component) OnSettings(_ context.Context, msg any) error {
+	in, ok := msg.(Settings)
+	if !ok {
+		return fmt.Errorf("invalid settings")
 	}
+	c.mu.Lock()
+	c.settings = in
+	c.settingsFromPort = true
+	isRunning := c.cancel != nil
+	c.mu.Unlock()
+	if isRunning {
+		c.persistRunningState()
+	}
+	return nil
 }
 
-func (c *Component) handleControl(_ context.Context, handler module.Handler, msg interface{}) error {
+// OnReconcile restores schedule/context/error from metadata and resumes
+// running state if the cron was previously active.
+func (c *Component) OnReconcile(ctx context.Context, node v1alpha1.TinyNode) error {
+	c.restoreSettingsFromMetadata(node.Status.Metadata)
+	c.handleOrphanedRunningState(ctx, node.Status.Metadata)
+	return nil
+}
+
+// OnControl handles Start/Stop dashboard clicks.
+func (c *Component) OnControl(ctx context.Context, msg any) error {
+	if msg == nil {
+		return nil
+	}
+	if !utils.IsLeader(ctx) {
+		return nil
+	}
+	return c.handleControl(msg)
+}
+
+func (c *Component) handleControl(msg interface{}) error {
 	switch ctrl := msg.(type) {
 	case ControlRunning:
 		if ctrl.Stop {
-			return c.stop(handler)
+			return c.stop()
 		}
 	case ControlStopped:
 		// Validate schedule before starting
@@ -131,7 +139,7 @@ func (c *Component) handleControl(_ context.Context, handler module.Handler, msg
 			c.mu.Lock()
 			c.lastError = errMsg
 			c.mu.Unlock()
-			c.persistError(handler, errMsg)
+			c.persistError(errMsg)
 			return nil
 		}
 
@@ -141,22 +149,11 @@ func (c *Component) handleControl(_ context.Context, handler module.Handler, msg
 		c.settingsFromPort = true
 		c.lastError = ""
 		c.mu.Unlock()
-		c.clearError(handler)
+		c.clearError()
 
-		c.persistRunningState(handler)
-		go c.run(context.Background(), handler)
+		c.persistRunningState()
+		go c.run(context.Background())
 	}
-	return nil
-}
-
-func (c *Component) handleReconcile(ctx context.Context, handler module.Handler, msg interface{}) error {
-	node, ok := msg.(v1alpha1.TinyNode)
-	if !ok {
-		return nil
-	}
-
-	c.restoreSettingsFromMetadata(node.Status.Metadata)
-	c.handleOrphanedRunningState(ctx, handler, node.Status.Metadata)
 	return nil
 }
 
@@ -194,16 +191,14 @@ func (c *Component) restoreSettingsFromMetadata(metadata map[string]string) {
 	}
 }
 
-func (c *Component) handleOrphanedRunningState(ctx context.Context, handler module.Handler, metadata map[string]string) {
+func (c *Component) handleOrphanedRunningState(ctx context.Context, metadata map[string]string) {
 	if metadata == nil {
 		return
 	}
-
 	if _, hasRunning := metadata[metadataKeyRunning]; !hasRunning {
 		return
 	}
 
-	// Already running locally
 	c.mu.Lock()
 	if c.cancel != nil {
 		c.mu.Unlock()
@@ -216,10 +211,10 @@ func (c *Component) handleOrphanedRunningState(ctx context.Context, handler modu
 	}
 
 	log.Info().Msg("cron component: resuming after pod restart or leadership change")
-	go c.run(context.Background(), handler)
+	go c.run(context.Background())
 }
 
-func (c *Component) run(ctx context.Context, handler module.Handler) error {
+func (c *Component) run(ctx context.Context) error {
 	c.runMu.Lock()
 	defer c.runMu.Unlock()
 
@@ -237,7 +232,7 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 		c.mu.Lock()
 		c.cancel = nil
 		c.mu.Unlock()
-		c.clearRunningMetadata(handler)
+		c.clearRunningMetadata()
 		return fmt.Errorf("invalid cron expression %q: %w", schedule, err)
 	}
 
@@ -245,14 +240,14 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 	c.nextTick = sched.Next(time.Now())
 	c.mu.Unlock()
 
-	handler(context.Background(), v1alpha1.ReconcilePort, nil)
+	c.Emit(context.Background(), v1alpha1.ReconcilePort, nil)
 
 	defer func() {
 		c.mu.Lock()
 		c.cancel = nil
 		c.nextTick = time.Time{}
 		c.mu.Unlock()
-		handler(context.Background(), v1alpha1.ReconcilePort, nil)
+		c.Emit(context.Background(), v1alpha1.ReconcilePort, nil)
 	}()
 
 	log.Info().Str("schedule", schedule).Time("nextTick", c.nextTick).Msg("cron: started")
@@ -270,7 +265,7 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 		data := c.settings.Context
 		c.mu.Unlock()
 
-		if err := utils.CheckForError(handler(ctx, OutPort, data)); err != nil {
+		if err := utils.CheckForError(c.Emit(ctx, OutPort, data)); err != nil {
 			log.Warn().Err(err).Msg("cron: downstream error on out port")
 		}
 
@@ -282,7 +277,7 @@ func (c *Component) run(ctx context.Context, handler module.Handler) error {
 		c.nextTick = sched.Next(time.Now())
 		c.mu.Unlock()
 
-		handler(context.Background(), v1alpha1.ReconcilePort, nil)
+		c.Emit(context.Background(), v1alpha1.ReconcilePort, nil)
 
 		log.Debug().Time("nextTick", c.nextTick).Msg("cron: scheduled next tick")
 	}
@@ -305,25 +300,25 @@ func (c *Component) waitUntil(ctx context.Context, t time.Time) error {
 	}
 }
 
-func (c *Component) stop(handler module.Handler) error {
+func (c *Component) stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.cancel != nil {
 		c.cancel()
 	}
-	c.clearRunningMetadata(handler)
+	c.clearRunningMetadata()
 	return nil
 }
 
-func (c *Component) persistRunningState(handler module.Handler) {
+func (c *Component) persistRunningState() {
 	c.mu.Lock()
 	schedule := c.settings.Schedule
 	cronCtx := c.settings.Context
 	c.mu.Unlock()
 
 	ctxBytes, _ := json.Marshal(cronCtx)
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}
@@ -334,8 +329,8 @@ func (c *Component) persistRunningState(handler module.Handler) {
 	})
 }
 
-func (c *Component) clearRunningMetadata(handler module.Handler) {
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+func (c *Component) clearRunningMetadata() {
+	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata != nil {
 			delete(n.Status.Metadata, metadataKeyRunning)
 			delete(n.Status.Metadata, metadataKeySchedule)
@@ -346,8 +341,8 @@ func (c *Component) clearRunningMetadata(handler module.Handler) {
 	})
 }
 
-func (c *Component) persistError(handler module.Handler, errMsg string) {
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+func (c *Component) persistError(errMsg string) {
+	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}
@@ -356,8 +351,8 @@ func (c *Component) persistError(handler module.Handler, errMsg string) {
 	})
 }
 
-func (c *Component) clearError(handler module.Handler) {
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+func (c *Component) clearError() {
+	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata != nil {
 			delete(n.Status.Metadata, metadataKeyError)
 		}
@@ -405,7 +400,17 @@ func (c *Component) control() interface{} {
 	}
 }
 
-var _ module.Component = (*Component)(nil)
+// Handle is unreachable: every port is system or source.
+func (c *Component) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
+	return fmt.Errorf("cron has no business-port input: got %q", port)
+}
+
+var (
+	_ module.Component        = (*Component)(nil)
+	_ module.SettingsHandler  = (*Component)(nil)
+	_ module.ReconcileHandler = (*Component)(nil)
+	_ module.ControlHandler   = (*Component)(nil)
+)
 
 func init() {
 	registry.Register((&Component{}).Instance())

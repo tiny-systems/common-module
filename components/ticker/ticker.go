@@ -32,6 +32,8 @@ type Settings struct {
 }
 
 type Component struct {
+	module.Base
+
 	settings Settings
 
 	cancelFunc     context.CancelFunc
@@ -39,10 +41,9 @@ type Component struct {
 
 	runLock *sync.Mutex
 
-	// settingsFromPort is set when _control or _settings port provides values.
-	// When true, _reconcile skips metadata restore and _settings preserves
-	// the port-set Context instead of overwriting with stale CRD values
-	// (delivery order is not guaranteed).
+	// settingsFromPort tracks whether OnSettings or OnControl has provided
+	// fresh values since the runner started. Reconcile uses this to decide
+	// whether stale metadata should restore in-memory state.
 	settingsFromPort bool
 }
 
@@ -79,78 +80,62 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
-	switch port {
-	case v1alpha1.SettingsPort:
-		in, ok := msg.(Settings)
-		if !ok {
-			return fmt.Errorf("invalid settings")
-		}
-		if t.settingsFromPort {
-			in.Context = t.settings.Context
-		}
-		t.settings = in
-		t.settingsFromPort = true
-		if t.isRunning() {
-			t.persistMetadata(handler)
-		}
-		return nil
-
-	case v1alpha1.ReconcilePort:
-		return t.handleReconcile(ctx, handler, msg)
-
-	case v1alpha1.ControlPort:
-		return t.handleControl(ctx, handler, msg)
+// OnSettings receives settings from the SettingsPort. Marks settingsFromPort
+// so a later reconcile won't restore stale metadata over fresh values.
+// Preserves the existing in-memory Context if a control click set it before
+// the CRD-driven settings catch up.
+func (t *Component) OnSettings(_ context.Context, msg any) error {
+	in, ok := msg.(Settings)
+	if !ok {
+		return fmt.Errorf("invalid settings")
 	}
-
-	return fmt.Errorf("invalid port: %s", port)
+	if t.settingsFromPort {
+		in.Context = t.settings.Context
+	}
+	t.settings = in
+	t.settingsFromPort = true
+	if t.isRunning() {
+		t.persistMetadata()
+	}
+	return nil
 }
 
-func (t *Component) handleReconcile(ctx context.Context, handler module.Handler, msg interface{}) error {
-	node, ok := msg.(v1alpha1.TinyNode)
-	if !ok {
-		return nil
-	}
-
+// OnReconcile restores running state from node metadata if a previous
+// instance was emitting before pod restart.
+func (t *Component) OnReconcile(ctx context.Context, node v1alpha1.TinyNode) error {
 	if node.Status.Metadata == nil {
 		return nil
 	}
-
-	// Check if we should be running
 	if _, running := node.Status.Metadata[metadataKeyRunning]; !running {
 		return nil
 	}
-
-	// Already running, skip
 	if t.isRunning() {
 		return nil
 	}
-
-	// Only leader restarts
 	if !utils.IsLeader(ctx) {
 		return nil
 	}
 
-	// Restore config from metadata
-	if configStr, ok := node.Status.Metadata[metadataKeyConfig]; ok {
-		var cfg Settings
-		if err := json.Unmarshal([]byte(configStr), &cfg); err == nil {
-			t.settings = cfg
-			t.settingsFromPort = true
+	if !t.settingsFromPort {
+		if configStr, ok := node.Status.Metadata[metadataKeyConfig]; ok {
+			var cfg Settings
+			if err := json.Unmarshal([]byte(configStr), &cfg); err == nil {
+				t.settings = cfg
+				t.settingsFromPort = true
+			}
 		}
 	}
 
 	log.Info().Interface("settings", t.settings).Msg("ticker: restoring from metadata")
-	go t.emit(ctx, handler)
-
+	go t.run(ctx)
 	return nil
 }
 
-func (t *Component) handleControl(ctx context.Context, handler module.Handler, msg interface{}) error {
+// OnControl handles Start/Stop dashboard clicks.
+func (t *Component) OnControl(ctx context.Context, msg any) error {
 	if msg == nil {
 		return nil
 	}
-
 	if !utils.IsLeader(ctx) {
 		return nil
 	}
@@ -159,32 +144,31 @@ func (t *Component) handleControl(ctx context.Context, handler module.Handler, m
 	case ControlRunning:
 		if ctrl.Stop {
 			t.settingsFromPort = false
-			t.clearMetadata(handler)
+			t.clearMetadata()
 			return t.stop()
 		}
 	case ControlStopped:
 		t.settings.Context = ctrl.Context
 		t.settingsFromPort = true
-		t.persistMetadata(handler)
+		t.persistMetadata()
 
 		if t.isRunning() {
 			return nil
 		}
-
-		go t.emit(context.Background(), handler)
+		go t.run(context.Background())
 	}
 	return nil
 }
 
-func (t *Component) emit(ctx context.Context, handler module.Handler) error {
+func (t *Component) run(ctx context.Context) error {
 	t.runLock.Lock()
 	defer t.runLock.Unlock()
 
-	// Use Background context - emit is long-running and shouldn't inherit caller's deadline
+	// Use Background context - long-running and shouldn't inherit caller's deadline
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
-	// Bridge: cancel emit when parent context is done (e.g., runner shutdown)
+	// Bridge: cancel run when parent context is done (e.g., runner shutdown)
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -194,13 +178,11 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 	}()
 
 	t.setCancelFunc(runCancel)
-	// Update control port to show Running
-	_ = handler(context.Background(), v1alpha1.ControlPort, t.getControl())
+	_ = t.Emit(context.Background(), v1alpha1.ControlPort, t.getControl())
 
 	defer func() {
 		t.setCancelFunc(nil)
-		// Update control port to show Not running
-		_ = handler(context.Background(), v1alpha1.ControlPort, t.getControl())
+		_ = t.Emit(context.Background(), v1alpha1.ControlPort, t.getControl())
 	}()
 
 	timer := time.NewTimer(0) // first tick fires immediately
@@ -209,7 +191,8 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 	for {
 		select {
 		case <-timer.C:
-			if err := utils.CheckForError(handler(trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{})), OutPort, t.settings.Context)); err != nil {
+			emitCtx := trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{}))
+			if err := utils.CheckForError(t.Emit(emitCtx, OutPort, t.settings.Context)); err != nil {
 				log.Warn().Err(err).Msg("ticker: downstream error on out port")
 			}
 			timer.Reset(time.Duration(t.settings.Delay) * time.Millisecond)
@@ -224,9 +207,9 @@ func (t *Component) emit(ctx context.Context, handler module.Handler) error {
 	}
 }
 
-func (t *Component) persistMetadata(handler module.Handler) {
+func (t *Component) persistMetadata() {
 	configBytes, _ := json.Marshal(t.settings)
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}
@@ -236,8 +219,8 @@ func (t *Component) persistMetadata(handler module.Handler) {
 	})
 }
 
-func (t *Component) clearMetadata(handler module.Handler) {
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+func (t *Component) clearMetadata() {
+	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			return nil
 		}
@@ -312,8 +295,20 @@ func (t *Component) getControl() interface{} {
 	}
 }
 
-var _ module.Component = (*Component)(nil)
-var _ module.Destroyer = (*Component)(nil)
+// Handle is unreachable for ticker — every port the component declares is
+// either system (dispatched via capabilities) or source (emit-only). The
+// stub guards against accidental routing.
+func (t *Component) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
+	return fmt.Errorf("ticker has no business-port input: got %q", port)
+}
+
+var (
+	_ module.Component        = (*Component)(nil)
+	_ module.SettingsHandler  = (*Component)(nil)
+	_ module.ReconcileHandler = (*Component)(nil)
+	_ module.ControlHandler   = (*Component)(nil)
+	_ module.Destroyer        = (*Component)(nil)
+)
 
 func (t *Component) OnDestroy(_ map[string]string) {
 	t.stop()

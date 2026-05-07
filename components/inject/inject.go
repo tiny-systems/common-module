@@ -50,6 +50,8 @@ type ErrorOutput struct {
 
 // Component implements config injection with metadata persistence
 type Component struct {
+	module.Base
+
 	settings         Settings
 	config           any
 	settingsFromPort bool // set when config port provides data; prevents _reconcile from overwriting with stale metadata
@@ -68,66 +70,57 @@ func (c *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
-	switch port {
-	case v1alpha1.ReconcilePort:
-		return c.handleReconcile(msg)
-
-	case v1alpha1.SettingsPort:
-		in, ok := msg.(Settings)
-		if !ok {
-			return fmt.Errorf("invalid settings")
-		}
-		c.settings = in
-		return nil
-
-	case ConfigPort:
-		return c.handleConfig(handler, msg)
-
-	case MessagePort:
-		return c.handleMessage(ctx, handler, msg)
+// OnSettings receives Settings from the SettingsPort.
+func (c *Component) OnSettings(_ context.Context, msg any) error {
+	in, ok := msg.(Settings)
+	if !ok {
+		return fmt.Errorf("invalid settings")
 	}
-
-	return fmt.Errorf("unknown port: %s", port)
+	c.settings = in
+	return nil
 }
 
-func (c *Component) handleReconcile(msg any) error {
-	node, ok := msg.(v1alpha1.TinyNode)
-	if !ok {
-		return nil
-	}
-
+// OnReconcile restores stored config from metadata, unless the config port
+// already provided fresh data.
+func (c *Component) OnReconcile(_ context.Context, node v1alpha1.TinyNode) error {
 	if node.Status.Metadata == nil {
 		return nil
 	}
-
 	configStr, ok := node.Status.Metadata[metadataKeyConfig]
 	if !ok {
 		return nil
 	}
-
 	if c.settingsFromPort {
 		return nil
 	}
-
 	var config any
 	if err := json.Unmarshal([]byte(configStr), &config); err != nil {
 		return nil
 	}
-
 	c.config = config
 	return nil
 }
 
-func (c *Component) handleConfig(handler module.Handler, msg any) any {
+// Handle dispatches business ports (Config and Message). System ports go
+// through capability methods.
+func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
+	switch port {
+	case ConfigPort:
+		return c.handleConfig(msg)
+	case MessagePort:
+		return c.handleMessage(ctx, handler, msg)
+	}
+	return fmt.Errorf("unknown port: %s", port)
+}
+
+func (c *Component) handleConfig(msg any) any {
 	in, ok := msg.(Config)
 	if !ok {
 		return fmt.Errorf("invalid config")
 	}
-
 	c.config = in.Data
 	c.settingsFromPort = true
-	c.persistConfig(handler)
+	c.persistConfig()
 	return nil
 }
 
@@ -136,23 +129,21 @@ func (c *Component) handleMessage(ctx context.Context, handler module.Handler, m
 	if !ok {
 		return fmt.Errorf("invalid message")
 	}
-
 	if c.settings.ConfigRequired && c.config == nil {
 		return handler(ctx, ErrorPort, ErrorOutput{
 			Context: in.Context,
 			Error:   "config not set",
 		})
 	}
-
 	return handler(ctx, OutputPort, Output{
 		Context: in.Context,
 		Config:  c.config,
 	})
 }
 
-func (c *Component) persistConfig(handler module.Handler) {
+func (c *Component) persistConfig() {
 	configBytes, _ := json.Marshal(c.config)
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}
@@ -197,7 +188,11 @@ func (c *Component) Ports() []module.Port {
 	return ports
 }
 
-var _ module.Component = (*Component)(nil)
+var (
+	_ module.Component        = (*Component)(nil)
+	_ module.SettingsHandler  = (*Component)(nil)
+	_ module.ReconcileHandler = (*Component)(nil)
+)
 
 func init() {
 	registry.Register(&Component{})

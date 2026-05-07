@@ -101,6 +101,8 @@ type Control struct {
 
 // Component implements a metadata-backed key-value store
 type Component struct {
+	module.Base
+
 	mu        sync.RWMutex
 	settings  Settings
 	records   map[string][]byte
@@ -136,25 +138,91 @@ func (c *Component) getControl() Control {
 	}
 }
 
+// OnSettings receives Settings from the SettingsPort.
+func (c *Component) OnSettings(_ context.Context, msg any) error {
+	in, ok := msg.(Settings)
+	if !ok {
+		return fmt.Errorf("invalid settings")
+	}
+	if len(in.Document) == 0 {
+		return fmt.Errorf("document must have at least one field")
+	}
+	if in.PrimaryKey == "" {
+		return fmt.Errorf("primary key cannot be empty")
+	}
+	if _, ok := in.Document[in.PrimaryKey]; !ok {
+		return fmt.Errorf("primary key %q not found in document", in.PrimaryKey)
+	}
+	if in.MaxRecords <= 0 {
+		in.MaxRecords = defaultMaxRecords
+	}
+	c.mu.Lock()
+	c.settings = in
+	c.mu.Unlock()
+	return nil
+}
+
+// OnReconcile rebuilds the in-memory record cache from metadata, unless
+// the local store has been used since startup (storeUsed guard).
+func (c *Component) OnReconcile(_ context.Context, node v1alpha1.TinyNode) error {
+	if node.Status.Metadata == nil {
+		return nil
+	}
+	c.mu.RLock()
+	skip := c.storeUsed
+	c.mu.RUnlock()
+	if skip {
+		return nil
+	}
+	c.mu.Lock()
+	for k, v := range node.Status.Metadata {
+		if !strings.HasPrefix(k, metadataPrefix) {
+			continue
+		}
+		key := k[len(metadataPrefix):]
+		c.records[key] = []byte(v)
+	}
+	c.mu.Unlock()
+	return nil
+}
+
+// OnControl handles the Reset button on the dashboard.
+func (c *Component) OnControl(_ context.Context, msg any) error {
+	in, ok := msg.(Control)
+	if !ok {
+		return fmt.Errorf("invalid control")
+	}
+	if !in.Reset {
+		return nil
+	}
+
+	c.mu.Lock()
+	c.records = make(map[string][]byte)
+	c.storeUsed = true // keep guard active so reconcile won't reload stale metadata
+	c.mu.Unlock()
+
+	// Remove all kv-* metadata keys
+	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		if n.Status.Metadata == nil {
+			return nil
+		}
+		for k := range n.Status.Metadata {
+			if strings.HasPrefix(k, metadataPrefix) {
+				delete(n.Status.Metadata, k)
+			}
+		}
+		return nil
+	})
+
+	// Update control port with new record count
+	_ = c.Emit(context.Background(), v1alpha1.ControlPort, c.getControl())
+	return nil
+}
+
+// Handle dispatches the business ports (Store and Query). System ports
+// are handled by capability methods above.
 func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
 	switch port {
-	case v1alpha1.ReconcilePort:
-		return c.handleReconcile(msg)
-
-	case v1alpha1.SettingsPort:
-		in, ok := msg.(Settings)
-		if !ok {
-			return fmt.Errorf("invalid settings")
-		}
-		return c.handleSettings(in)
-
-	case v1alpha1.ControlPort:
-		in, ok := msg.(Control)
-		if !ok {
-			return fmt.Errorf("invalid control")
-		}
-		return c.handleControl(handler, in)
-
 	case StorePort:
 		in, ok := msg.(StoreRequest)
 		if !ok {
@@ -169,85 +237,7 @@ func (c *Component) Handle(ctx context.Context, handler module.Handler, port str
 		}
 		return c.handleQuery(ctx, handler, in)
 	}
-
 	return fmt.Errorf("unknown port: %s", port)
-}
-
-func (c *Component) handleControl(handler module.Handler, in Control) error {
-	if !in.Reset {
-		return nil
-	}
-
-	c.mu.Lock()
-	c.records = make(map[string][]byte)
-	c.storeUsed = true // keep guard active so reconcile won't reload stale metadata
-	c.mu.Unlock()
-
-	// Remove all kv-* metadata keys
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
-		if n.Status.Metadata == nil {
-			return nil
-		}
-		for k := range n.Status.Metadata {
-			if strings.HasPrefix(k, metadataPrefix) {
-				delete(n.Status.Metadata, k)
-			}
-		}
-		return nil
-	})
-
-	// Update control port with new record count
-	_ = handler(context.Background(), v1alpha1.ControlPort, c.getControl())
-	return nil
-}
-
-func (c *Component) handleSettings(in Settings) error {
-	if len(in.Document) == 0 {
-		return fmt.Errorf("document must have at least one field")
-	}
-	if in.PrimaryKey == "" {
-		return fmt.Errorf("primary key cannot be empty")
-	}
-	if _, ok := in.Document[in.PrimaryKey]; !ok {
-		return fmt.Errorf("primary key %q not found in document", in.PrimaryKey)
-	}
-	if in.MaxRecords <= 0 {
-		in.MaxRecords = defaultMaxRecords
-	}
-
-	c.mu.Lock()
-	c.settings = in
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *Component) handleReconcile(msg any) error {
-	node, ok := msg.(v1alpha1.TinyNode)
-	if !ok {
-		return nil
-	}
-	if node.Status.Metadata == nil {
-		return nil
-	}
-
-	c.mu.RLock()
-	skip := c.storeUsed
-	c.mu.RUnlock()
-
-	if skip {
-		return nil
-	}
-
-	c.mu.Lock()
-	for k, v := range node.Status.Metadata {
-		if !strings.HasPrefix(k, metadataPrefix) {
-			continue
-		}
-		key := k[len(metadataPrefix):]
-		c.records[key] = []byte(v)
-	}
-	c.mu.Unlock()
-	return nil
 }
 
 func (c *Component) handleStore(ctx context.Context, handler module.Handler, req StoreRequest) any {
@@ -291,7 +281,7 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 		c.records[pkStr] = data
 		c.mu.Unlock()
 
-		_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 			if n.Status.Metadata == nil {
 				n.Status.Metadata = make(map[string]string)
 			}
@@ -305,7 +295,7 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 		delete(c.records, pkStr)
 		c.mu.Unlock()
 
-		_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+		_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 			if n.Status.Metadata != nil {
 				delete(n.Status.Metadata, metaKey)
 			}
@@ -317,7 +307,7 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 	}
 
 	// Update control port with current record count
-	_ = handler(context.Background(), v1alpha1.ControlPort, c.getControl())
+	_ = c.Emit(context.Background(), v1alpha1.ControlPort, c.getControl())
 
 	if enableAck {
 		return handler(ctx, StoreAckPort, StoreAck{
@@ -455,8 +445,11 @@ func (c *Component) Ports() []module.Port {
 }
 
 var (
-	_ module.Component    = (*Component)(nil)
-	_ jsonschema.Preparer = (*Document)(nil)
+	_ module.Component        = (*Component)(nil)
+	_ module.SettingsHandler  = (*Component)(nil)
+	_ module.ReconcileHandler = (*Component)(nil)
+	_ module.ControlHandler   = (*Component)(nil)
+	_ jsonschema.Preparer     = (*Document)(nil)
 )
 
 func init() {

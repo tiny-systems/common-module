@@ -30,10 +30,11 @@ type Settings struct {
 }
 
 type Component struct {
+	module.Base
+
 	settings         Settings
 	settingsFromPort bool // prevents reconcile from restoring stale metadata
 	nodeName         string
-	handler          module.Handler
 	mu               sync.Mutex // protects isRunning, sentContext, cancelFunc
 	isRunning        bool
 	sentContext      Context
@@ -67,30 +68,65 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
-	t.handler = handler
+// OnSettings receives Settings from the SettingsPort and marks
+// settingsFromPort to suppress later reconciles from restoring stale data.
+func (t *Component) OnSettings(_ context.Context, msg any) error {
+	in, ok := msg.(Settings)
+	if !ok {
+		return fmt.Errorf("invalid settings")
+	}
+	t.settings = in
+	t.settingsFromPort = true
+	t.mu.Lock()
+	if !t.isRunning {
+		t.sentContext = nil
+	}
+	t.mu.Unlock()
+	return nil
+}
 
-	switch port {
-	case v1alpha1.ReconcilePort:
-		return t.handleReconcile(ctx, handler, msg)
-	case v1alpha1.ControlPort:
-		return t.handleControl(ctx, handler, msg)
-	case v1alpha1.SettingsPort:
-		return t.handleSettings(msg)
+// OnReconcile restores send context from metadata and resumes any orphaned
+// blocking call (pod restart while OutPort was still pending).
+func (t *Component) OnReconcile(ctx context.Context, node v1alpha1.TinyNode) error {
+	t.nodeName = node.Name
+	t.restoreContextFromMetadata(node.Status.Metadata)
+	t.handleOrphanedRunningState(ctx, node.Status.Metadata)
+	return nil
+}
+
+// OnControl handles Send/Reset dashboard clicks.
+func (t *Component) OnControl(ctx context.Context, msg any) error {
+	log.Info().
+		Bool("isLeader", utils.IsLeader(ctx)).
+		Interface("msg", msg).
+		Str("msgType", fmt.Sprintf("%T", msg)).
+		Msg("signal component: ControlPort received")
+
+	if !utils.IsLeader(ctx) {
+		return nil
+	}
+
+	switch ctrl := msg.(type) {
+	case ControlRunning:
+		log.Info().Bool("reset", ctrl.Reset).Msg("signal component: ControlRunning parsed")
+		if ctrl.Reset {
+			return t.handleReset()
+		}
+	case ControlStopped:
+		log.Info().Bool("send", ctrl.Send).Msg("signal component: ControlStopped parsed")
+		if ctrl.Send {
+			return t.handleSend(ctrl.Context)
+		}
+	default:
+		log.Error().Str("msgType", fmt.Sprintf("%T", msg)).Msg("signal component: type assertion failed")
+		return fmt.Errorf("invalid input msg: expected ControlRunning or ControlStopped, got %T", msg)
 	}
 	return nil
 }
 
-func (t *Component) handleReconcile(ctx context.Context, handler module.Handler, msg interface{}) error {
-	node, ok := msg.(v1alpha1.TinyNode)
-	if !ok {
-		return nil
-	}
-
-	t.nodeName = node.Name
-	t.restoreContextFromMetadata(node.Status.Metadata)
-	t.handleOrphanedRunningState(ctx, handler, node.Status.Metadata)
-	return nil
+// Handle is unreachable: OutPort is source-only, no business input.
+func (t *Component) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
+	return fmt.Errorf("signal has no business-port input: got %q", port)
 }
 
 func (t *Component) restoreContextFromMetadata(metadata map[string]string) {
@@ -115,7 +151,7 @@ func (t *Component) restoreContextFromMetadata(metadata map[string]string) {
 	t.mu.Unlock()
 }
 
-func (t *Component) handleOrphanedRunningState(ctx context.Context, handler module.Handler, metadata map[string]string) {
+func (t *Component) handleOrphanedRunningState(ctx context.Context, metadata map[string]string) {
 	if metadata == nil {
 		return
 	}
@@ -140,16 +176,16 @@ func (t *Component) handleOrphanedRunningState(ctx context.Context, handler modu
 	if t.sentContext == nil {
 		t.mu.Unlock()
 		log.Warn().Msg("signal component: cannot resume - no saved context, clearing orphaned state")
-		t.clearRunningMetadata(handler)
+		t.clearRunningMetadata()
 		return
 	}
 	t.mu.Unlock()
 
 	log.Info().Msg("signal component: resuming flow after pod restart")
-	t.resumeBlockingCall(handler)
+	t.resumeBlockingCall()
 }
 
-func (t *Component) resumeBlockingCall(handler module.Handler) {
+func (t *Component) resumeBlockingCall() {
 	t.mu.Lock()
 	t.isRunning = true
 	sendCtx, cancel := context.WithCancel(context.Background())
@@ -157,40 +193,10 @@ func (t *Component) resumeBlockingCall(handler module.Handler) {
 	sentCtx := t.sentContext
 	t.mu.Unlock()
 
-	go t.runBlockingCall(handler, sendCtx, sentCtx)
+	go t.runBlockingCall(sendCtx, sentCtx)
 }
 
-func (t *Component) handleControl(ctx context.Context, handler module.Handler, msg interface{}) error {
-	log.Info().
-		Bool("isLeader", utils.IsLeader(ctx)).
-		Interface("msg", msg).
-		Str("msgType", fmt.Sprintf("%T", msg)).
-		Msg("signal component: ControlPort received")
-
-	if !utils.IsLeader(ctx) {
-		return nil
-	}
-
-	switch ctrl := msg.(type) {
-	case ControlRunning:
-		log.Info().Bool("reset", ctrl.Reset).Msg("signal component: ControlRunning parsed")
-		if ctrl.Reset {
-			return t.handleReset(handler)
-		}
-	case ControlStopped:
-		log.Info().Bool("send", ctrl.Send).Msg("signal component: ControlStopped parsed")
-		if ctrl.Send {
-			return t.handleSend(handler, ctrl.Context)
-		}
-	default:
-		log.Error().Str("msgType", fmt.Sprintf("%T", msg)).Msg("signal component: type assertion failed")
-		return fmt.Errorf("invalid input msg: expected ControlRunning or ControlStopped, got %T", msg)
-	}
-
-	return nil
-}
-
-func (t *Component) handleReset(handler module.Handler) error {
+func (t *Component) handleReset() error {
 	log.Info().Msg("signal component: reset requested")
 
 	t.mu.Lock()
@@ -202,11 +208,11 @@ func (t *Component) handleReset(handler module.Handler) error {
 	t.isRunning = false
 	t.mu.Unlock()
 
-	t.clearRunningMetadata(handler)
+	t.clearRunningMetadata()
 	return nil
 }
 
-func (t *Component) handleSend(handler module.Handler, sendContext Context) error {
+func (t *Component) handleSend(sendContext Context) error {
 	log.Info().Msg("signal component: send requested, calling OutPort")
 
 	t.mu.Lock()
@@ -216,15 +222,15 @@ func (t *Component) handleSend(handler module.Handler, sendContext Context) erro
 	t.cancelFunc = cancel
 	t.mu.Unlock()
 
-	t.persistRunningState(handler, sendContext)
+	t.persistRunningState(sendContext)
 
-	go t.runBlockingCall(handler, sendCtx, sendContext)
+	go t.runBlockingCall(sendCtx, sendContext)
 
 	return nil
 }
 
-func (t *Component) runBlockingCall(handler module.Handler, ctx context.Context, sendContext Context) {
-	result := handler(ctx, OutPort, sendContext)
+func (t *Component) runBlockingCall(ctx context.Context, sendContext Context) {
+	result := t.Emit(ctx, OutPort, sendContext)
 
 	log.Info().Interface("result", result).Msg("signal component: OutPort returned, send complete")
 
@@ -233,13 +239,13 @@ func (t *Component) runBlockingCall(handler module.Handler, ctx context.Context,
 	t.cancelFunc = nil
 	t.mu.Unlock()
 
-	t.clearRunningMetadata(handler)
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, nil)
+	t.clearRunningMetadata()
+	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, nil)
 }
 
-func (t *Component) persistRunningState(handler module.Handler, sendContext Context) {
+func (t *Component) persistRunningState(sendContext Context) {
 	ctxBytes, _ := json.Marshal(sendContext)
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}
@@ -249,28 +255,13 @@ func (t *Component) persistRunningState(handler module.Handler, sendContext Cont
 	})
 }
 
-func (t *Component) clearRunningMetadata(handler module.Handler) {
-	_ = handler(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+func (t *Component) clearRunningMetadata() {
+	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata != nil {
 			delete(n.Status.Metadata, metadataKeyRunning)
 		}
 		return nil
 	})
-}
-
-func (t *Component) handleSettings(msg interface{}) error {
-	in, ok := msg.(Settings)
-	if !ok {
-		return fmt.Errorf("invalid settings")
-	}
-	t.settings = in
-	t.settingsFromPort = true
-	t.mu.Lock()
-	if !t.isRunning {
-		t.sentContext = nil
-	}
-	t.mu.Unlock()
-	return nil
 }
 
 func (t *Component) Ports() []module.Port {
@@ -323,7 +314,12 @@ func (t *Component) Ports() []module.Port {
 	}
 }
 
-var _ module.Component = (*Component)(nil)
+var (
+	_ module.Component        = (*Component)(nil)
+	_ module.SettingsHandler  = (*Component)(nil)
+	_ module.ReconcileHandler = (*Component)(nil)
+	_ module.ControlHandler   = (*Component)(nil)
+)
 
 func init() {
 	registry.Register((&Component{}).Instance())

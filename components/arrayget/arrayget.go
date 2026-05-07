@@ -68,27 +68,29 @@ func (c *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
-	switch port {
-	case v1alpha1.SettingsPort:
-		in, ok := msg.(Settings)
-		if !ok {
-			return fmt.Errorf("invalid settings")
-		}
-		c.settingsLock.Lock()
-		c.settings = in
-		c.settingsLock.Unlock()
-		return nil
-
-	case RequestPort:
-		in, ok := msg.(Request)
-		if !ok {
-			return fmt.Errorf("invalid request")
-		}
-		return c.handleRequest(ctx, handler, in)
+// OnSettings receives Settings from the SettingsPort.
+func (c *Component) OnSettings(_ context.Context, msg any) error {
+	in, ok := msg.(Settings)
+	if !ok {
+		return fmt.Errorf("invalid settings")
 	}
+	c.settingsLock.Lock()
+	c.settings = in
+	c.settingsLock.Unlock()
+	return nil
+}
 
-	return fmt.Errorf("unknown port: %s", port)
+// Handle dispatches business-port messages. System ports are routed via
+// the capability interfaces above.
+func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
+	if port != RequestPort {
+		return fmt.Errorf("unknown port: %s", port)
+	}
+	in, ok := msg.(Request)
+	if !ok {
+		return fmt.Errorf("invalid request")
+	}
+	return c.handleRequest(ctx, handler, in)
 }
 
 func (c *Component) handleRequest(ctx context.Context, handler module.Handler, req Request) any {
@@ -168,7 +170,10 @@ func (c *Component) Ports() []module.Port {
 	return ports
 }
 
-var _ module.Component = (*Component)(nil)
+var (
+	_ module.Component       = (*Component)(nil)
+	_ module.SettingsHandler = (*Component)(nil)
+)
 
 func init() {
 	registry.Register(&Component{})

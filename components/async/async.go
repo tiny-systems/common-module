@@ -50,45 +50,46 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
+// OnSettings receives Settings from the SettingsPort and resizes the
+// concurrency semaphore.
+func (t *Component) OnSettings(_ context.Context, msg any) error {
+	in, ok := msg.(Settings)
+	if !ok {
+		return fmt.Errorf("invalid settings")
+	}
+	t.settings = in
+	maxConc := in.MaxConcurrency
+	if maxConc <= 0 {
+		maxConc = defaultMaxConcurrency
+	}
+	t.semaphore = make(chan struct{}, maxConc)
+	return nil
+}
+
+// Handle dispatches the InPort. System ports go through the capability
+// interfaces above.
 func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
-	switch port {
-	case v1alpha1.SettingsPort:
-		in, ok := msg.(Settings)
-		if !ok {
-			return fmt.Errorf("invalid settings")
-		}
-		t.settings = in
-		// Recreate semaphore with new capacity
-		maxConc := in.MaxConcurrency
-		if maxConc <= 0 {
-			maxConc = defaultMaxConcurrency
-		}
-		t.semaphore = make(chan struct{}, maxConc)
-		return nil
-
-	case InPort:
-		in, ok := msg.(InMessage)
-		if !ok {
-			return fmt.Errorf("invalid message")
-		}
-
-		// Try to acquire semaphore slot (non-blocking for async behavior)
-		select {
-		case t.semaphore <- struct{}{}:
-			// Got a slot, spawn goroutine
-			go func() {
-				defer func() { <-t.semaphore }() // Release slot when done
-				_ = handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, in.Context)
-			}()
-		default:
-			// Semaphore full - run synchronously to apply backpressure
-      return handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, in.Context)
-		}
-		return nil
-
-	default:
+	if port != InPort {
 		return fmt.Errorf("port %s is not supported", port)
 	}
+	in, ok := msg.(InMessage)
+	if !ok {
+		return fmt.Errorf("invalid message")
+	}
+
+	// Try to acquire semaphore slot (non-blocking for async behavior)
+	select {
+	case t.semaphore <- struct{}{}:
+		// Got a slot, spawn goroutine
+		go func() {
+			defer func() { <-t.semaphore }() // Release slot when done
+			_ = handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, in.Context)
+		}()
+	default:
+		// Semaphore full - run synchronously to apply backpressure
+		return handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, in.Context)
+	}
+	return nil
 }
 
 func (t *Component) Ports() []module.Port {
@@ -114,7 +115,10 @@ func (t *Component) Ports() []module.Port {
 	}
 }
 
-var _ module.Component = (*Component)(nil)
+var (
+	_ module.Component       = (*Component)(nil)
+	_ module.SettingsHandler = (*Component)(nil)
+)
 
 func init() {
 	registry.Register((&Component{}).Instance())

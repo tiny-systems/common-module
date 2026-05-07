@@ -28,6 +28,8 @@ type Control struct {
 }
 
 type Component struct {
+	module.Base
+
 	settings Settings
 }
 
@@ -40,27 +42,29 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, output module.Handler, port string, msg interface{}) any {
+// OnSettings receives Settings from the SettingsPort.
+func (t *Component) OnSettings(_ context.Context, msg any) error {
+	in, ok := msg.(Settings)
+	if !ok {
+		return fmt.Errorf("invalid settings")
+	}
+	t.settings = in
+	return nil
+}
 
-	switch port {
-	case v1alpha1.SettingsPort:
-		in, ok := msg.(Settings)
-		if !ok {
-			return fmt.Errorf("invalid settings")
-		}
-		t.settings = in
-		return nil
-	case InPort:
-		if in, ok := msg.(InMessage); ok {
-			t.settings.Context = in.Context
-			_ = output(ctx, v1alpha1.ReconcilePort, nil)
-			return nil
-
-		}
+// Handle dispatches the InPort. Updates the displayed Context and triggers
+// a reconcile so the Control port re-renders.
+func (t *Component) Handle(ctx context.Context, _ module.Handler, port string, msg interface{}) any {
+	if port != InPort {
+		return fmt.Errorf("unknown port: %s", port)
+	}
+	in, ok := msg.(InMessage)
+	if !ok {
 		return fmt.Errorf("invalid message in")
 	}
-
-	return fmt.Errorf("unknown port: %s", port)
+	t.settings.Context = in.Context
+	_ = t.Emit(ctx, v1alpha1.ReconcilePort, nil)
+	return nil
 }
 
 func (t *Component) Ports() []module.Port {
@@ -91,7 +95,10 @@ func (t *Component) Instance() module.Component {
 	return &Component{}
 }
 
-var _ module.Component = (*Component)(nil)
+var (
+	_ module.Component       = (*Component)(nil)
+	_ module.SettingsHandler = (*Component)(nil)
+)
 
 func init() {
 	registry.Register((&Component{}).Instance())

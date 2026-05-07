@@ -88,19 +88,23 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
-	if port == v1alpha1.SettingsPort {
-		in, ok := msg.(Settings)
-		if !ok {
-			return fmt.Errorf("invalid settings")
-		}
-		t.settings = in
-		return nil
+// OnSettings receives Settings from the SettingsPort.
+func (t *Component) OnSettings(_ context.Context, msg any) error {
+	in, ok := msg.(Settings)
+	if !ok {
+		return fmt.Errorf("invalid settings")
 	}
+	t.settings = in
+	return nil
+}
 
+// Handle routes business-port input to the matching output. The router has
+// no other system port logic — settings/control/reconcile dispatch live in
+// the capability methods.
+func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
 	in, ok := msg.(InMessage)
 	if !ok {
-		return fmt.Errorf("invalid message")
+		return fmt.Errorf("invalid message on port %q", port)
 	}
 
 	for _, condition := range in.Conditions {
@@ -180,8 +184,11 @@ func getPortNameFromRoute(route string) string {
 	return fmt.Sprintf("out_%s", strings.ToLower(route))
 }
 
-var _ module.Component = (*Component)(nil)
-var _ jsonschema.Exposer = (*RouteName)(nil)
+var (
+	_ module.Component       = (*Component)(nil)
+	_ module.SettingsHandler = (*Component)(nil)
+	_ jsonschema.Exposer     = (*RouteName)(nil)
+)
 
 func init() {
 	registry.Register((&Component{}).Instance())
