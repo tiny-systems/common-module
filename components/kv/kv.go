@@ -366,13 +366,12 @@ func (c *Component) Ports() []module.Port {
 		{
 			Name:  StorePort,
 			Label: "Store",
-			// Durable: writes are persisted as TinySignal CRDs before
-			// dispatch. Caller's edge unblocks at "work owed", not "work
-			// done". A pod crash mid-handle leaves the signal in the
-			// cluster; the new leader picks it up and retries. Kv writes
-			// are idempotent on (primaryKey, payload), so at-least-once
-			// delivery is safe.
-			Durable: true,
+			// NOTE: Durable=true was attempted in v0.4.0/v0.4.1 but the
+			// cluster CRD schema for TinySignal is missing the EdgeID
+			// and From fields the SDK now writes (CRD wasn't regenerated
+			// + applied). API server silently strips them, reconciler
+			// can't reconstruct edge config, signals pile up unfixable.
+			// Reverted to non-durable until CRD is properly migrated.
 			Configuration: StoreRequest{
 				Operation: OpStore,
 				Document:  settings.Document,
