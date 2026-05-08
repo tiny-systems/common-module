@@ -366,6 +366,13 @@ func (c *Component) Ports() []module.Port {
 		{
 			Name:  StorePort,
 			Label: "Store",
+			// Durable: writes are persisted as TinySignal CRDs before
+			// dispatch. Caller's edge unblocks at "work owed", not "work
+			// done". A pod crash mid-handle leaves the signal in the
+			// cluster; the new leader picks it up and retries. Kv writes
+			// are idempotent on (primaryKey, payload), so at-least-once
+			// delivery is safe.
+			Durable: true,
 			Configuration: StoreRequest{
 				Operation: OpStore,
 				Document:  settings.Document,
