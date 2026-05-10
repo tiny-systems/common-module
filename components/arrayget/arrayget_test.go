@@ -13,18 +13,18 @@ func TestArrayGet_ValidIndex(t *testing.T) {
 	items := []Item{"apple", "banana", "cherry"}
 
 	var result Result
-	handler := module.Handler(func(_ context.Context, port string, msg any) any {
+	handler := module.Handler(func(_ context.Context, port string, msg any) module.Result {
 		if port == ResultPort {
 			result = msg.(Result)
 		}
-		return nil
+		return module.Result{}
 	})
 
-	err := c.handleRequest(context.Background(), handler, Request{
+	r := c.handleRequest(context.Background(), handler, Request{
 		Array: items,
 		Index: 2,
 	})
-	if err != nil {
+	if err := r.Err(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.Item != "banana" {
@@ -40,18 +40,18 @@ func TestArrayGet_FirstItem(t *testing.T) {
 	items := []Item{"only"}
 
 	var result Result
-	handler := module.Handler(func(_ context.Context, port string, msg any) any {
+	handler := module.Handler(func(_ context.Context, port string, msg any) module.Result {
 		if port == ResultPort {
 			result = msg.(Result)
 		}
-		return nil
+		return module.Result{}
 	})
 
-	err := c.handleRequest(context.Background(), handler, Request{
+	r := c.handleRequest(context.Background(), handler, Request{
 		Array: items,
 		Index: 1,
 	})
-	if err != nil {
+	if err := r.Err(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.Item != "only" {
@@ -62,11 +62,11 @@ func TestArrayGet_FirstItem(t *testing.T) {
 func TestArrayGet_EmptyArray(t *testing.T) {
 	c := &Component{}
 
-	err := c.handleRequest(context.Background(), nil, Request{
+	r := c.handleRequest(context.Background(), nil, Request{
 		Array: []Item{},
 		Index: 1,
 	})
-	if err == nil {
+	if r.Err() == nil {
 		t.Fatal("expected error for empty array")
 	}
 }
@@ -74,11 +74,11 @@ func TestArrayGet_EmptyArray(t *testing.T) {
 func TestArrayGet_NilArray(t *testing.T) {
 	c := &Component{}
 
-	err := c.handleRequest(context.Background(), nil, Request{
+	r := c.handleRequest(context.Background(), nil, Request{
 		Array: nil,
 		Index: 1,
 	})
-	if err == nil {
+	if r.Err() == nil {
 		t.Fatal("expected error for nil array")
 	}
 }
@@ -86,11 +86,11 @@ func TestArrayGet_NilArray(t *testing.T) {
 func TestArrayGet_IndexTooHigh(t *testing.T) {
 	c := &Component{}
 
-	err := c.handleRequest(context.Background(), nil, Request{
+	r := c.handleRequest(context.Background(), nil, Request{
 		Array: []Item{"a", "b"},
 		Index: 5,
 	})
-	if err == nil {
+	if r.Err() == nil {
 		t.Fatal("expected error for index out of range")
 	}
 }
@@ -98,11 +98,11 @@ func TestArrayGet_IndexTooHigh(t *testing.T) {
 func TestArrayGet_IndexZero(t *testing.T) {
 	c := &Component{}
 
-	err := c.handleRequest(context.Background(), nil, Request{
+	r := c.handleRequest(context.Background(), nil, Request{
 		Array: []Item{"a"},
 		Index: 0,
 	})
-	if err == nil {
+	if r.Err() == nil {
 		t.Fatal("expected error for index 0")
 	}
 }
@@ -110,11 +110,11 @@ func TestArrayGet_IndexZero(t *testing.T) {
 func TestArrayGet_IndexNegative(t *testing.T) {
 	c := &Component{}
 
-	err := c.handleRequest(context.Background(), nil, Request{
+	r := c.handleRequest(context.Background(), nil, Request{
 		Array: []Item{"a"},
 		Index: -1,
 	})
-	if err == nil {
+	if r.Err() == nil {
 		t.Fatal("expected error for negative index")
 	}
 }
@@ -123,18 +123,18 @@ func TestArrayGet_ErrorPort(t *testing.T) {
 	c := &Component{settings: Settings{EnableErrorPort: true}}
 
 	var gotError Error
-	handler := module.Handler(func(_ context.Context, port string, msg any) any {
+	handler := module.Handler(func(_ context.Context, port string, msg any) module.Result {
 		if port == ErrorPort {
 			gotError = msg.(Error)
 		}
-		return nil
+		return module.Result{}
 	})
 
-	err := c.handleRequest(context.Background(), handler, Request{
+	r := c.handleRequest(context.Background(), handler, Request{
 		Array: []Item{},
 		Index: 1,
 	})
-	if err != nil {
+	if err := r.Err(); err != nil {
 		t.Fatalf("with error port enabled, should not return error: %v", err)
 	}
 	if gotError.Error == "" {
@@ -147,19 +147,19 @@ func TestArrayGet_ContextPassthrough(t *testing.T) {
 	ctx := map[string]string{"key": "value"}
 
 	var result Result
-	handler := module.Handler(func(_ context.Context, port string, msg any) any {
+	handler := module.Handler(func(_ context.Context, port string, msg any) module.Result {
 		if port == ResultPort {
 			result = msg.(Result)
 		}
-		return nil
+		return module.Result{}
 	})
 
-	err := c.handleRequest(context.Background(), handler, Request{
+	r := c.handleRequest(context.Background(), handler, Request{
 		Context: ctx,
 		Array:   []Item{"item"},
 		Index:   1,
 	})
-	if err != nil {
+	if err := r.Err(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	ctxMap, ok := result.Context.(map[string]string)
@@ -175,15 +175,15 @@ func TestArrayGet_HandlerErrorPropagation(t *testing.T) {
 	c := &Component{}
 	expectedErr := errors.New("downstream error")
 
-	handler := module.Handler(func(_ context.Context, port string, msg any) any {
-		return expectedErr
+	handler := module.Handler(func(_ context.Context, port string, msg any) module.Result {
+		return module.Fail(expectedErr)
 	})
 
-	result := c.handleRequest(context.Background(), handler, Request{
+	r := c.handleRequest(context.Background(), handler, Request{
 		Array: []Item{"item"},
 		Index: 1,
 	})
-	if result != expectedErr {
-		t.Fatalf("expected handler error to propagate, got: %v", result)
+	if !errors.Is(r.Err(), expectedErr) {
+		t.Fatalf("expected handler error to propagate, got: %v", r.Err())
 	}
 }

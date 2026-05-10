@@ -60,18 +60,18 @@ func (c *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
+func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) module.Result {
 	if port != InPort {
-		return fmt.Errorf("unknown port: %s", port)
+		return module.Fail(fmt.Errorf("unknown port: %s", port))
 	}
 
 	in, ok := msg.(InMessage)
 	if !ok {
-		return fmt.Errorf("invalid message")
+		return module.Fail(fmt.Errorf("invalid message"))
 	}
 
 	if in.GroupByPath == "" {
-		return fmt.Errorf("groupByPath is required")
+		return module.Fail(fmt.Errorf("groupByPath is required"))
 	}
 
 	// Group items by the path

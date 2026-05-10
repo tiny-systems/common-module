@@ -37,14 +37,14 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
+func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) module.Result {
 
 	in, ok := msg.(Request)
 	if !ok {
-		return fmt.Errorf("invalid message")
+		return module.Fail(fmt.Errorf("invalid message"))
 	}
 	if in.Delay <= 0 {
-		return fmt.Errorf("invalid delay")
+		return module.Fail(fmt.Errorf("invalid delay"))
 	}
 
 	time.Sleep(time.Millisecond * time.Duration(in.Delay))

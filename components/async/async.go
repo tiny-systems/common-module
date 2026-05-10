@@ -68,19 +68,22 @@ func (t *Component) OnSettings(_ context.Context, msg any) error {
 
 // Handle dispatches the InPort. System ports go through the capability
 // interfaces above.
-func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) any {
+func (t *Component) Handle(ctx context.Context, handler module.Handler, port string, msg interface{}) module.Result {
 	if port != InPort {
-		return fmt.Errorf("port %s is not supported", port)
+		return module.Fail(fmt.Errorf("port %s is not supported", port))
 	}
 	in, ok := msg.(InMessage)
 	if !ok {
-		return fmt.Errorf("invalid message")
+		return module.Fail(fmt.Errorf("invalid message"))
 	}
 
 	// Try to acquire semaphore slot (non-blocking for async behavior)
 	select {
 	case t.semaphore <- struct{}{}:
-		// Got a slot, spawn goroutine
+		// Got a slot, spawn goroutine. The handler return is intentionally
+		// discarded — async by definition has no upstream waiting on the
+		// downstream response, so this is the one legitimate fire-and-forget
+		// drop point in this component.
 		go func() {
 			defer func() { <-t.semaphore }() // Release slot when done
 			_ = handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, in.Context)
@@ -89,7 +92,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		// Semaphore full - run synchronously to apply backpressure
 		return handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, in.Context)
 	}
-	return nil
+	return module.Result{}
 }
 
 func (t *Component) Ports() []module.Port {

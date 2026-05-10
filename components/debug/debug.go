@@ -54,17 +54,17 @@ func (t *Component) OnSettings(_ context.Context, msg any) error {
 
 // Handle dispatches the InPort. Updates the displayed Context and triggers
 // a reconcile so the Control port re-renders.
-func (t *Component) Handle(ctx context.Context, _ module.Handler, port string, msg interface{}) any {
+func (t *Component) Handle(ctx context.Context, _ module.Handler, port string, msg interface{}) module.Result {
 	if port != InPort {
-		return fmt.Errorf("unknown port: %s", port)
+		return module.Fail(fmt.Errorf("unknown port: %s", port))
 	}
 	in, ok := msg.(InMessage)
 	if !ok {
-		return fmt.Errorf("invalid message in")
+		return module.Fail(fmt.Errorf("invalid message in"))
 	}
 	t.settings.Context = in.Context
-	_ = t.Emit(ctx, v1alpha1.ReconcilePort, nil)
-	return nil
+	t.Emit(ctx, v1alpha1.ReconcilePort, nil)
+	return module.Result{}
 }
 
 func (t *Component) Ports() []module.Port {

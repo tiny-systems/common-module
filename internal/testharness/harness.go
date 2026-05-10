@@ -78,7 +78,7 @@ func New(c module.Component) *Harness {
 // Handler implements module.Handler, capturing outputs and metadata writes.
 // Reconcile-port updaters are applied to both h.Metadata (legacy hand-rolled
 // access) and the fake K8s client (so State.Get sees them).
-func (h *Harness) Handler(ctx context.Context, port string, data any) any {
+func (h *Harness) Handler(ctx context.Context, port string, data any) module.Result {
 	if port == v1alpha1.ReconcilePort {
 		if fn, ok := data.(func(*v1alpha1.TinyNode) error); ok {
 			h.mu.Lock()
@@ -87,7 +87,7 @@ func (h *Harness) Handler(ctx context.Context, port string, data any) any {
 			}
 			if err := fn(node); err != nil {
 				h.mu.Unlock()
-				return err
+				return module.Fail(err)
 			}
 			h.Metadata = node.Status.Metadata
 			h.mu.Unlock()
@@ -102,16 +102,16 @@ func (h *Harness) Handler(ctx context.Context, port string, data any) any {
 				}
 			}
 		}
-		return nil
+		return module.Result{}
 	}
 	h.mu.Lock()
 	h.Outputs = append(h.Outputs, PortMsg{Port: port, Data: data})
 	h.mu.Unlock()
-	return nil
+	return module.Result{}
 }
 
 // LeaderHandler returns a handler with IsLeader=true in context.
-func (h *Harness) LeaderHandler(ctx context.Context, port string, data any) any {
+func (h *Harness) LeaderHandler(ctx context.Context, port string, data any) module.Result {
 	return h.Handler(utils.WithLeader(ctx, true), port, data)
 }
 
@@ -119,17 +119,17 @@ func (h *Harness) LeaderHandler(ctx context.Context, port string, data any) any 
 // ports, dispatches through the matching capability interface when the
 // component implements one (mirroring scheduler.Update's Phase 1). For
 // other ports, falls through to Component.Handle.
-func (h *Harness) Handle(ctx context.Context, port string, msg any) any {
+func (h *Harness) Handle(ctx context.Context, port string, msg any) module.Result {
 	return h.dispatch(ctx, port, msg)
 }
 
 // HandleAsLeader sends a message with IsLeader=true in context.
-func (h *Harness) HandleAsLeader(ctx context.Context, port string, msg any) any {
+func (h *Harness) HandleAsLeader(ctx context.Context, port string, msg any) module.Result {
 	return h.dispatch(utils.WithLeader(ctx, true), port, msg)
 }
 
 // Reconcile simulates a reconcile event with current metadata.
-func (h *Harness) Reconcile(ctx context.Context) any {
+func (h *Harness) Reconcile(ctx context.Context) module.Result {
 	h.mu.Lock()
 	meta := copyMap(h.Metadata)
 	h.mu.Unlock()
@@ -139,7 +139,7 @@ func (h *Harness) Reconcile(ctx context.Context) any {
 }
 
 // ReconcileAsLeader simulates a reconcile with IsLeader=true.
-func (h *Harness) ReconcileAsLeader(ctx context.Context) any {
+func (h *Harness) ReconcileAsLeader(ctx context.Context) module.Result {
 	h.mu.Lock()
 	meta := copyMap(h.Metadata)
 	h.mu.Unlock()
@@ -151,41 +151,41 @@ func (h *Harness) ReconcileAsLeader(ctx context.Context) any {
 // dispatch routes the call to a capability interface for system ports when
 // the component implements one, or to Component.Handle otherwise. This
 // mirrors what scheduler.Update + dispatchCapability do at runtime.
-func (h *Harness) dispatch(ctx context.Context, port string, msg any) any {
+func (h *Harness) dispatch(ctx context.Context, port string, msg any) module.Result {
 	switch port {
 	case v1alpha1.SettingsPort:
 		if c, ok := h.component.(module.SettingsHandler); ok {
 			if err := c.OnSettings(ctx, msg); err != nil {
-				return err
+				return module.Fail(err)
 			}
-			return nil
+			return module.Result{}
 		}
 	case v1alpha1.ReconcilePort:
 		if c, ok := h.component.(module.ReconcileHandler); ok {
 			node, _ := msg.(v1alpha1.TinyNode)
 			if err := c.OnReconcile(ctx, node); err != nil {
-				return err
+				return module.Fail(err)
 			}
-			return nil
+			return module.Result{}
 		}
 	case v1alpha1.ControlPort:
 		if c, ok := h.component.(module.ControlHandler); ok {
 			if err := c.OnControl(ctx, msg); err != nil {
-				return err
+				return module.Fail(err)
 			}
-			return nil
+			return module.Result{}
 		}
 	case v1alpha1.IdentityPort:
 		if c, ok := h.component.(module.IdentityAware); ok {
 			id, _ := msg.(v1alpha1.NodeIdentity)
 			c.OnIdentity(id)
-			return nil
+			return module.Result{}
 		}
 	case v1alpha1.ClientPort:
 		if c, ok := h.component.(module.ClientAware); ok {
 			client, _ := msg.(module.K8sClient)
 			c.OnClient(client)
-			return nil
+			return module.Result{}
 		}
 	}
 	return h.component.Handle(ctx, h.Handler, port, msg)

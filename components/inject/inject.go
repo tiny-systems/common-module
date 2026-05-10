@@ -103,31 +103,31 @@ func (c *Component) OnReconcile(_ context.Context, node v1alpha1.TinyNode) error
 
 // Handle dispatches business ports (Config and Message). System ports go
 // through capability methods.
-func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
+func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) module.Result {
 	switch port {
 	case ConfigPort:
 		return c.handleConfig(msg)
 	case MessagePort:
 		return c.handleMessage(ctx, handler, msg)
 	}
-	return fmt.Errorf("unknown port: %s", port)
+	return module.Fail(fmt.Errorf("unknown port: %s", port))
 }
 
-func (c *Component) handleConfig(msg any) any {
+func (c *Component) handleConfig(msg any) module.Result {
 	in, ok := msg.(Config)
 	if !ok {
-		return fmt.Errorf("invalid config")
+		return module.Fail(fmt.Errorf("invalid config"))
 	}
 	c.config = in.Data
 	c.settingsFromPort = true
 	c.persistConfig()
-	return nil
+	return module.Result{}
 }
 
-func (c *Component) handleMessage(ctx context.Context, handler module.Handler, msg any) any {
+func (c *Component) handleMessage(ctx context.Context, handler module.Handler, msg any) module.Result {
 	in, ok := msg.(Message)
 	if !ok {
-		return fmt.Errorf("invalid message")
+		return module.Fail(fmt.Errorf("invalid message"))
 	}
 	if c.settings.ConfigRequired && c.config == nil {
 		return handler(ctx, ErrorPort, ErrorOutput{
@@ -143,7 +143,7 @@ func (c *Component) handleMessage(ctx context.Context, handler module.Handler, m
 
 func (c *Component) persistConfig() {
 	configBytes, _ := json.Marshal(c.config)
-	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}

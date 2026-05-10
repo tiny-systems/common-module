@@ -202,26 +202,26 @@ func (c *Component) OnControl(ctx context.Context, msg any) error {
 
 // Handle dispatches the business ports (Store and Query). System ports
 // are handled by capability methods above.
-func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) any {
+func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) module.Result {
 	switch port {
 	case StorePort:
 		in, ok := msg.(StoreRequest)
 		if !ok {
-			return fmt.Errorf("invalid store request")
+			return module.Fail(fmt.Errorf("invalid store request"))
 		}
 		return c.handleStore(ctx, handler, in)
 
 	case QueryPort:
 		in, ok := msg.(QueryRequest)
 		if !ok {
-			return fmt.Errorf("invalid query request")
+			return module.Fail(fmt.Errorf("invalid query request"))
 		}
 		return c.handleQuery(ctx, handler, in)
 	}
-	return fmt.Errorf("unknown port: %s", port)
+	return module.Fail(fmt.Errorf("unknown port: %s", port))
 }
 
-func (c *Component) handleStore(ctx context.Context, handler module.Handler, req StoreRequest) any {
+func (c *Component) handleStore(ctx context.Context, handler module.Handler, req StoreRequest) module.Result {
 	c.mu.RLock()
 	pk := c.settings.PrimaryKey
 	maxRecords := c.settings.MaxRecords
@@ -230,52 +230,52 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 
 	pkVal, ok := req.Document[pk]
 	if !ok {
-		return fmt.Errorf("primary key %q not found in document", pk)
+		return module.Fail(fmt.Errorf("primary key %q not found in document", pk))
 	}
 	pkStr, ok := pkVal.(string)
 	if !ok {
-		return fmt.Errorf("primary key must be a string, got %T", pkVal)
+		return module.Fail(fmt.Errorf("primary key must be a string, got %T", pkVal))
 	}
 	if pkStr == "" {
-		return fmt.Errorf("primary key cannot be empty")
+		return module.Fail(fmt.Errorf("primary key cannot be empty"))
 	}
 
 	if c.State() == nil {
-		return fmt.Errorf("state backend not available")
+		return module.Fail(fmt.Errorf("state backend not available"))
 	}
 
 	switch req.Operation {
 	case OpStore:
 		data, err := json.Marshal(req.Document)
 		if err != nil {
-			return fmt.Errorf("failed to marshal document: %v", err)
+			return module.Fail(fmt.Errorf("failed to marshal document: %v", err))
 		}
 		if len(data) > maxRecordSizeBytes {
-			return fmt.Errorf("document too large: %d bytes (max %d)", len(data), maxRecordSizeBytes)
+			return module.Fail(fmt.Errorf("document too large: %d bytes (max %d)", len(data), maxRecordSizeBytes))
 		}
 
 		// Capacity check (allow update of existing key)
 		if _, exists, _ := c.State().Get(ctx, pkStr); !exists {
 			keys, _ := c.State().List(ctx, "")
 			if len(keys) >= maxRecords {
-				return fmt.Errorf("store full: %d records (max %d)", len(keys), maxRecords)
+				return module.Fail(fmt.Errorf("store full: %d records (max %d)", len(keys), maxRecords))
 			}
 		}
 
 		if err := c.State().Set(ctx, pkStr, data); err != nil {
-			return fmt.Errorf("state.Set: %v", err)
+			return module.Fail(fmt.Errorf("state.Set: %v", err))
 		}
 
 	case OpDelete:
 		if err := c.State().Delete(ctx, pkStr); err != nil {
-			return fmt.Errorf("state.Delete: %v", err)
+			return module.Fail(fmt.Errorf("state.Delete: %v", err))
 		}
 
 	default:
-		return fmt.Errorf("unknown operation: %s", req.Operation)
+		return module.Fail(fmt.Errorf("unknown operation: %s", req.Operation))
 	}
 
-	_ = c.Emit(context.Background(), v1alpha1.ControlPort, c.getControl(ctx))
+	c.Emit(context.Background(), v1alpha1.ControlPort, c.getControl(ctx))
 
 	if enableAck {
 		return handler(ctx, StoreAckPort, StoreAck{
@@ -283,17 +283,17 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 			Request: req,
 		})
 	}
-	return nil
+	return module.Result{}
 }
 
-func (c *Component) handleQuery(ctx context.Context, handler module.Handler, req QueryRequest) any {
+func (c *Component) handleQuery(ctx context.Context, handler module.Handler, req QueryRequest) module.Result {
 	if c.State() == nil {
-		return fmt.Errorf("state backend not available")
+		return module.Fail(fmt.Errorf("state backend not available"))
 	}
 
 	keys, err := c.State().List(ctx, "")
 	if err != nil {
-		return fmt.Errorf("list keys: %v", err)
+		return module.Fail(fmt.Errorf("list keys: %v", err))
 	}
 
 	var results []QueryResultItem

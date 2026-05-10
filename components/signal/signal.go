@@ -125,8 +125,8 @@ func (t *Component) OnControl(ctx context.Context, msg any) error {
 }
 
 // Handle is unreachable: OutPort is source-only, no business input.
-func (t *Component) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
-	return fmt.Errorf("signal has no business-port input: got %q", port)
+func (t *Component) Handle(_ context.Context, _ module.Handler, port string, _ any) module.Result {
+	return module.Fail(fmt.Errorf("signal has no business-port input: got %q", port))
 }
 
 func (t *Component) restoreContextFromMetadata(metadata map[string]string) {
@@ -240,12 +240,12 @@ func (t *Component) runBlockingCall(ctx context.Context, sendContext Context) {
 	t.mu.Unlock()
 
 	t.clearRunningMetadata()
-	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, nil)
+	t.Emit(context.Background(), v1alpha1.ReconcilePort, nil)
 }
 
 func (t *Component) persistRunningState(sendContext Context) {
 	ctxBytes, _ := json.Marshal(sendContext)
-	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}
@@ -256,7 +256,7 @@ func (t *Component) persistRunningState(sendContext Context) {
 }
 
 func (t *Component) clearRunningMetadata() {
-	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata != nil {
 			delete(n.Status.Metadata, metadataKeyRunning)
 		}

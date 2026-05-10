@@ -178,11 +178,11 @@ func (t *Component) run(ctx context.Context) error {
 	}()
 
 	t.setCancelFunc(runCancel)
-	_ = t.Emit(context.Background(), v1alpha1.ControlPort, t.getControl())
+	t.Emit(context.Background(), v1alpha1.ControlPort, t.getControl())
 
 	defer func() {
 		t.setCancelFunc(nil)
-		_ = t.Emit(context.Background(), v1alpha1.ControlPort, t.getControl())
+		t.Emit(context.Background(), v1alpha1.ControlPort, t.getControl())
 	}()
 
 	timer := time.NewTimer(0) // first tick fires immediately
@@ -192,7 +192,7 @@ func (t *Component) run(ctx context.Context) error {
 		select {
 		case <-timer.C:
 			emitCtx := trace.ContextWithSpanContext(runCtx, trace.NewSpanContext(trace.SpanContextConfig{}))
-			if err := utils.CheckForError(t.Emit(emitCtx, OutPort, t.settings.Context)); err != nil {
+			if err := t.Emit(emitCtx, OutPort, t.settings.Context).Err(); err != nil {
 				log.Warn().Err(err).Msg("ticker: downstream error on out port")
 			}
 			timer.Reset(time.Duration(t.settings.Delay) * time.Millisecond)
@@ -209,7 +209,7 @@ func (t *Component) run(ctx context.Context) error {
 
 func (t *Component) persistMetadata() {
 	configBytes, _ := json.Marshal(t.settings)
-	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}
@@ -220,7 +220,7 @@ func (t *Component) persistMetadata() {
 }
 
 func (t *Component) clearMetadata() {
-	_ = t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	t.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			return nil
 		}
@@ -298,8 +298,8 @@ func (t *Component) getControl() interface{} {
 // Handle is unreachable for ticker — every port the component declares is
 // either system (dispatched via capabilities) or source (emit-only). The
 // stub guards against accidental routing.
-func (t *Component) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
-	return fmt.Errorf("ticker has no business-port input: got %q", port)
+func (t *Component) Handle(_ context.Context, _ module.Handler, port string, _ any) module.Result {
+	return module.Fail(fmt.Errorf("ticker has no business-port input: got %q", port))
 }
 
 var (

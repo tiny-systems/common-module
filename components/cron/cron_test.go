@@ -286,8 +286,8 @@ func TestStopWhileNotRunning(t *testing.T) {
 	ctx := context.Background()
 
 	result := h.HandleAsLeader(ctx, "_control", cron.ControlRunning{Stop: true})
-	if result != nil {
-		t.Errorf("stop while not running returned: %v", result)
+	if err := result.Err(); err != nil {
+		t.Errorf("stop while not running returned: %v", err)
 	}
 }
 

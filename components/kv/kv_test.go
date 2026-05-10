@@ -27,7 +27,7 @@ func storeDoc(t *testing.T, h *testharness.Harness, doc kv.Document) {
 		Operation: kv.OpStore,
 		Document:  doc,
 	})
-	if err, ok := result.(error); ok {
+	if err := result.Err(); err != nil {
 		t.Fatalf("store failed: %v", err)
 	}
 }
@@ -186,7 +186,8 @@ func TestMaxRecords(t *testing.T) {
 		Operation: kv.OpStore,
 		Document:  kv.Document{"id": "c"},
 	})
-	if err, ok := result.(error); !ok {
+	err := result.Err()
+	if err == nil {
 		t.Fatal("expected error when store is full")
 	} else if !strings.Contains(err.Error(), "store full") {
 		t.Errorf("unexpected error: %v", err)
@@ -203,7 +204,8 @@ func TestDocumentTooLarge(t *testing.T) {
 		Operation: kv.OpStore,
 		Document:  kv.Document{"id": "big", "data": bigValue},
 	})
-	if err, ok := result.(error); !ok {
+	err := result.Err()
+	if err == nil {
 		t.Fatal("expected error for oversized document")
 	} else if !strings.Contains(err.Error(), "too large") {
 		t.Errorf("unexpected error: %v", err)
@@ -216,7 +218,7 @@ func TestEmptyPrimaryKey(t *testing.T) {
 		Operation: kv.OpStore,
 		Document:  kv.Document{"id": ""},
 	})
-	if _, ok := result.(error); !ok {
+	if result.Err() == nil {
 		t.Fatal("expected error for empty primary key")
 	}
 }
@@ -227,7 +229,7 @@ func TestMissingPrimaryKey(t *testing.T) {
 		Operation: kv.OpStore,
 		Document:  kv.Document{"name": "no-pk"},
 	})
-	if _, ok := result.(error); !ok {
+	if result.Err() == nil {
 		t.Fatal("expected error for missing primary key")
 	}
 }

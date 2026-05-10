@@ -43,19 +43,20 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-func (t *Component) Handle(ctx context.Context, handler module.Handler, _ string, msg interface{}) any {
+func (t *Component) Handle(ctx context.Context, handler module.Handler, _ string, msg interface{}) module.Result {
 	if in, ok := msg.(InMessage); ok {
 		for _, item := range in.Array {
-			if err := handler(ctx, OutPort, OutMessage{
+			r := handler(ctx, OutPort, OutMessage{
 				Context: in.Context,
 				Item:    item,
-			}); err != nil {
-				return err
+			})
+			if r.IsErr() {
+				return r
 			}
 		}
-		return nil
+		return module.Result{}
 	}
-	return fmt.Errorf("invalid message")
+	return module.Fail(fmt.Errorf("invalid message"))
 }
 
 func (t *Component) Ports() []module.Port {

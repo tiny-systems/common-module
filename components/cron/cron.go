@@ -265,7 +265,7 @@ func (c *Component) run(ctx context.Context) error {
 		data := c.settings.Context
 		c.mu.Unlock()
 
-		if err := utils.CheckForError(c.Emit(ctx, OutPort, data)); err != nil {
+		if err := c.Emit(ctx, OutPort, data).Err(); err != nil {
 			log.Warn().Err(err).Msg("cron: downstream error on out port")
 		}
 
@@ -318,7 +318,7 @@ func (c *Component) persistRunningState() {
 	c.mu.Unlock()
 
 	ctxBytes, _ := json.Marshal(cronCtx)
-	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}
@@ -330,7 +330,7 @@ func (c *Component) persistRunningState() {
 }
 
 func (c *Component) clearRunningMetadata() {
-	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata != nil {
 			delete(n.Status.Metadata, metadataKeyRunning)
 			delete(n.Status.Metadata, metadataKeySchedule)
@@ -342,7 +342,7 @@ func (c *Component) clearRunningMetadata() {
 }
 
 func (c *Component) persistError(errMsg string) {
-	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata == nil {
 			n.Status.Metadata = make(map[string]string)
 		}
@@ -352,7 +352,7 @@ func (c *Component) persistError(errMsg string) {
 }
 
 func (c *Component) clearError() {
-	_ = c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
+	c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
 		if n.Status.Metadata != nil {
 			delete(n.Status.Metadata, metadataKeyError)
 		}
@@ -401,8 +401,8 @@ func (c *Component) control() interface{} {
 }
 
 // Handle is unreachable: every port is system or source.
-func (c *Component) Handle(_ context.Context, _ module.Handler, port string, _ any) any {
-	return fmt.Errorf("cron has no business-port input: got %q", port)
+func (c *Component) Handle(_ context.Context, _ module.Handler, port string, _ any) module.Result {
+	return module.Fail(fmt.Errorf("cron has no business-port input: got %q", port))
 }
 
 var (
