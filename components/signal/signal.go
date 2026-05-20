@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/secret"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
 )
@@ -70,10 +71,24 @@ func (t *Component) GetInfo() module.ComponentInfo {
 
 // OnSettings receives Settings from the SettingsPort and marks
 // settingsFromPort to suppress later reconciles from restoring stale data.
-func (t *Component) OnSettings(_ context.Context, msg any) error {
+//
+// Resolves `{{secret:<name>/<key>}}` placeholders inside Settings.Context
+// against Kubernetes Secrets in the module pod's own namespace. Lets a flow
+// author write `apiKey: {{secret:demo-keys/anthropic}}` instead of leaking
+// the literal credential into the TinyNode spec. Requires the module to be
+// installed with `secrets.enabled=true` (adds the namespace-scoped Role).
+// If the K8s client hasn't arrived yet (early reconcile before OnClient),
+// the resolver is skipped — the next settings message after OnClient fires
+// will re-resolve.
+func (t *Component) OnSettings(ctx context.Context, msg any) error {
 	in, ok := msg.(Settings)
 	if !ok {
 		return fmt.Errorf("invalid settings")
+	}
+	if c := t.Client(); c != nil {
+		if err := secret.Resolve(ctx, &in, c); err != nil {
+			return fmt.Errorf("resolve secrets: %w", err)
+		}
 	}
 	t.settings = in
 	t.settingsFromPort = true
