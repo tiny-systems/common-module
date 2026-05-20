@@ -12,7 +12,7 @@ require (
 	github.com/spf13/viper v1.20.1
 	github.com/swaggest/jsonschema-go v0.3.79
 	github.com/tiny-systems/ajson v0.1.6
-	github.com/tiny-systems/module v0.7.0
+	github.com/tiny-systems/module v0.10.16
 	go.opentelemetry.io/otel/trace v1.39.0
 	k8s.io/apimachinery v0.34.0
 	sigs.k8s.io/controller-runtime v0.20.2
@@ -146,7 +146,7 @@ require (
 	github.com/swaggest/refl v1.4.0 // indirect
 	github.com/tiny-systems/errorpanic v0.7.1 // indirect
 	github.com/tiny-systems/otel-collector v0.5.1 // indirect
-	github.com/tiny-systems/platform-api v0.5.0 // indirect
+	github.com/tiny-systems/platform-api v0.5.6 // indirect
 	github.com/vmware-labs/yaml-jsonpath v0.3.2 // indirect
 	github.com/woodsbury/decimal128 v1.3.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
