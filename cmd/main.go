@@ -15,6 +15,7 @@ import (
 	_ "github.com/tiny-systems/common-module/components/groupby"
 	_ "github.com/tiny-systems/common-module/components/inject"
 	_ "github.com/tiny-systems/common-module/components/modify"
+	_ "github.com/tiny-systems/common-module/components/retry"
 	_ "github.com/tiny-systems/common-module/components/router"
 	_ "github.com/tiny-systems/common-module/components/signal"
 	_ "github.com/tiny-systems/common-module/components/split"

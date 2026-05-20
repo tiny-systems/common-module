@@ -19,6 +19,7 @@ Core building blocks for flow-based automations on the Tiny Systems platform.
 | Inject | Data enrichment -- merge additional data into messages |
 | Modify | Transform and reshape message data |
 | Key-Value Store | In-memory key-value storage for flow state |
+| Retry | Explicit retry supervisor with bounded attempts and configurable backoff. Wire to the error port of `llm_*` / `http_request` / database components; routes back to the original input until success or attempt limit. |
 
 ## Installation
 
