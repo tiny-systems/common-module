@@ -130,7 +130,20 @@ func (t *Component) OnControl(ctx context.Context, msg any) error {
 	case ControlStopped:
 		log.Info().Bool("send", ctrl.Send).Msg("signal component: ControlStopped parsed")
 		if ctrl.Send {
-			return t.handleSend(ctrl.Context)
+			// Resolve [[secret:name/key]] placeholders that the UI's
+			// Send dialog (or a TinySignal payload) may have carried in
+			// — settings.Context is resolved in OnSettings, but the
+			// control payload bypasses that path and would otherwise
+			// ship literal placeholders downstream.
+			sendCtx := ctrl.Context
+			if c := t.Client(); c != nil && sendCtx != nil {
+				resolveWrapper := struct{ Context Context }{Context: sendCtx}
+				if err := secret.Resolve(ctx, &resolveWrapper, c); err != nil {
+					return fmt.Errorf("resolve secrets in send context: %w", err)
+				}
+				sendCtx = resolveWrapper.Context
+			}
+			return t.handleSend(sendCtx)
 		}
 	default:
 		log.Error().Str("msgType", fmt.Sprintf("%T", msg)).Msg("signal component: type assertion failed")
