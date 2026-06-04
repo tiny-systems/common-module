@@ -170,9 +170,22 @@ func (c *Component) Ports() []module.Port {
 	return ports
 }
 
+// AgentTool opts array_get into the platform's MCP tool registry.
+// Stateless one-shot: agent supplies array + index, receives the
+// resolved element. Uses request / result instead of the in / out
+// defaults handleRPC assumes.
+func (c *Component) AgentTool() module.AgentToolInfo {
+	return module.AgentToolInfo{
+		Description: "Get an array element by 1-based index. Input: {array, index}; returns {item, index} or an error if the index is out of range.",
+		InputPort:   RequestPort,
+		OutputPort:  ResultPort,
+	}
+}
+
 var (
 	_ module.Component       = (*Component)(nil)
 	_ module.SettingsHandler = (*Component)(nil)
+	_ module.AgentTool       = (*Component)(nil)
 )
 
 func init() {
