@@ -18,12 +18,12 @@ const (
 type Context any
 
 type Request struct {
-	Context Context `json:"context" configurable:"true" title:"Context" description:"Payload to send into the durable chain"`
+	Context Context `json:"context" configurable:"true" title:"Context" description:"Payload to send into the run"`
 }
 
 type Started struct {
 	Context Context `json:"context,omitempty" configurable:"true" title:"Context"`
-	RunID   string  `json:"runID" title:"Run ID" description:"Durable run id — poll it with run_status"`
+	RunID   string  `json:"runID" title:"Run ID" description:"The run's id — check it with Run Status"`
 }
 
 // Component is the front door into durable execution. It starts a durable
@@ -45,9 +45,9 @@ func (t *Component) Instance() module.Component {
 func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
-		Description: "Durable Run Start",
-		Info:        "Front door into durable execution. Starts a durable run, emits the payload on Out fire-and-forget (returns once the first hop is durably stored — does NOT wait for the chain), then emits {context, runID} on Started for the synchronous reply. Wire Started back to http_server's Response to give HTTP callers a run handle they can poll with run_status. The run survives pod death and migrates across replicas.",
-		Tags:        []string{"SDK", "durable"},
+		Description: "Start Run & Reply",
+		Info:        "Starts a run and immediately returns its id, so a caller — like an HTTP request — gets an instant reply while the work keeps going. Send your payload in on In; wire Started back to your reply (e.g. an HTTP Response) to hand back the run id; everything after Out runs as a run you can watch and retry.",
+		Tags:        []string{"run", "reply"},
 	}
 }
 

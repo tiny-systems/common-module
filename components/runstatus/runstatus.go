@@ -21,7 +21,7 @@ type Context any
 
 type Request struct {
 	Context Context `json:"context" configurable:"true" title:"Context"`
-	RunID   string  `json:"runID" required:"true" title:"Run ID" description:"Durable run id returned by run_start"`
+	RunID   string  `json:"runID" required:"true" title:"Run ID" description:"The run id (returned by Start Run & Reply)"`
 }
 
 type Step struct {
@@ -61,9 +61,9 @@ func (t *Component) Instance() module.Component {
 func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
-		Description: "Durable Run Status",
-		Info:        "Polls a durable run's progress by run id. Reads the step ledger from the execution-scoped state: found (run known), complete (all emitted hops recorded, none failed), failed (a step recorded a terminal error), pendingSteps (hops emitted but not yet completed), and the per-step records. Pair with run_start behind an http_server for start/poll HTTP semantics.",
-		Tags:        []string{"SDK", "durable"},
+		Description: "Run Status",
+		Info:        "Checks a run's progress by id: whether the run is known (found), complete, or failed, how many steps are still pending, and the per-step details. Pair with Start Run & Reply behind an HTTP request for instant-reply-then-check.",
+		Tags:        []string{"run", "status"},
 	}
 }
 
