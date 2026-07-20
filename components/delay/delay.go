@@ -47,9 +47,15 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		return module.Fail(fmt.Errorf("invalid delay"))
 	}
 
-	time.Sleep(time.Millisecond * time.Duration(in.Delay))
-	// Return handler result to propagate responses back through the call chain
-	// (critical for blocking I/O patterns like HTTP Server)
+	// Sleep, but honor ctx — a cancelled/expired request context (transport
+	// deadline, pod shutdown) should abort the wait rather than sleep on.
+	timer := time.NewTimer(time.Millisecond * time.Duration(in.Delay))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return module.Fail(ctx.Err())
+	}
 	return handler(ctx, OutPort, in.Context)
 }
 
