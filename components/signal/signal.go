@@ -7,7 +7,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
-	"github.com/tiny-systems/module/pkg/secret"
 	"github.com/tiny-systems/module/pkg/utils"
 	"github.com/tiny-systems/module/registry"
 )
@@ -51,20 +50,13 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	}
 }
 
-// OnSettings receives Settings from the SettingsPort, resolving any
-// `{{secret:<name>/<key>}}` placeholders in Context against Kubernetes Secrets
-// in the module pod's namespace (requires the module installed with
-// secrets.enabled=true). Skipped if the K8s client hasn't arrived yet; the next
-// settings message after OnClient re-resolves.
-func (t *Component) OnSettings(ctx context.Context, msg any) error {
+// OnSettings receives Settings from the SettingsPort and stores them. Secret
+// values are supplied directly by the user through the trigger widget, so there
+// is no server-side placeholder resolution.
+func (t *Component) OnSettings(_ context.Context, msg any) error {
 	in, ok := msg.(Settings)
 	if !ok {
 		return fmt.Errorf("invalid settings")
-	}
-	if c := t.Client(); c != nil {
-		if err := secret.Resolve(ctx, &in, c); err != nil {
-			return fmt.Errorf("resolve secrets: %w", err)
-		}
 	}
 	t.settings = in
 	return nil
@@ -86,16 +78,8 @@ func (t *Component) OnControl(ctx context.Context, msg any) error {
 		return nil
 	}
 
-	// Resolve [[secret:name/key]] placeholders the Send dialog may have carried
-	// in — the control payload bypasses OnSettings' resolution.
+	// The Send dialog carries the user's values (including any secrets) directly.
 	sendCtx := ctrl.Context
-	if c := t.Client(); c != nil && sendCtx != nil {
-		wrapper := struct{ Context Context }{Context: sendCtx}
-		if err := secret.Resolve(ctx, &wrapper, c); err != nil {
-			return fmt.Errorf("resolve secrets in send context: %w", err)
-		}
-		sendCtx = wrapper.Context
-	}
 
 	log.Info().Msg("signal component: send — emitting on Out (fire-and-forget)")
 	go t.Emit(context.Background(), OutPort, sendCtx)
