@@ -19,9 +19,10 @@ type Settings struct {
 	Context Context `json:"context" configurable:"true" required:"true" title:"Context" description:"Component message"`
 }
 
-type InMessage struct {
-	Context Context `json:"context" configurable:"false" required:"true" title:"Context" title:"Context"`
-}
+// InMessage is the whole message the sink receives — a generic object so debug
+// displays EVERYTHING mapped into it (a node's full output), not just a declared
+// `context` field. Seeing the data is the entire point of a debug sink.
+type InMessage map[string]interface{}
 
 type Control struct {
 	Context Context `json:"context" readonly:"true" required:"true" title:"Context"`
@@ -62,7 +63,7 @@ func (t *Component) Handle(ctx context.Context, _ module.Handler, port string, m
 	if !ok {
 		return module.Fail(fmt.Errorf("invalid message in"))
 	}
-	t.settings.Context = in.Context
+	t.settings.Context = map[string]interface{}(in)
 	t.Emit(ctx, v1alpha1.ReconcilePort, nil)
 	return module.Result{}
 }
