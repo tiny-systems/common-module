@@ -78,8 +78,14 @@ func (t *Component) OnControl(ctx context.Context, msg any) error {
 		return nil
 	}
 
-	// The Send dialog carries the user's values (including any secrets) directly.
+	// The Send dialog carries the user's values directly. When Send is fired
+	// without a context (a bare {send:true} from the API, not the widget which
+	// pre-fills the form), fall back to the configured Settings.Context so the
+	// node emits its own configuration instead of a null.
 	sendCtx := ctrl.Context
+	if sendCtx == nil {
+		sendCtx = t.settings.Context
+	}
 
 	log.Info().Msg("signal component: send — emitting on Out (fire-and-forget)")
 	go t.Emit(context.Background(), OutPort, sendCtx)
