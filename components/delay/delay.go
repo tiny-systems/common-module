@@ -21,6 +21,13 @@ type Request struct {
 	Delay   int     `json:"delay" required:"true" title:"Component (ms)"`
 }
 
+// OutMessage keeps the passthrough Context under a `context` key so a downstream
+// edge reads $.context.<field> — the mid-chain convention (same as the router,
+// pod_logs_get, llm_tools). Was emitting the raw Context value at root.
+type OutMessage struct {
+	Context Context `json:"context" configurable:"true" title:"Context" description:"Passthrough — the message, unchanged"`
+}
+
 type Component struct {
 }
 
@@ -56,7 +63,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 	case <-ctx.Done():
 		return module.Fail(ctx.Err())
 	}
-	return handler(ctx, OutPort, in.Context)
+	return handler(ctx, OutPort, OutMessage{Context: in.Context})
 }
 
 func (t *Component) Ports() []module.Port {
@@ -73,7 +80,7 @@ func (t *Component) Ports() []module.Port {
 			Name:          OutPort,
 			Label:         "Out",
 			Source:        true,
-			Configuration: new(Context),
+			Configuration: new(OutMessage),
 			Position:      module.Right,
 		},
 	}

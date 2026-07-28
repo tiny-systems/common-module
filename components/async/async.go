@@ -29,6 +29,13 @@ type Settings struct {
 	MaxConcurrency int `json:"maxConcurrency" title:"Max Concurrency" description:"Maximum number of concurrent async operations. 0 means use default (100)."`
 }
 
+// OutMessage keeps the passthrough Context under a `context` key so a downstream
+// edge reads $.context.<field> — the mid-chain convention (same as the router,
+// pod_logs_get, llm_tools). Was emitting the raw Context value at root.
+type OutMessage struct {
+	Context Context `json:"context" configurable:"true" title:"Context" description:"Passthrough — the message, unchanged"`
+}
+
 type Component struct {
 	settings  Settings
 	semaphore chan struct{}
@@ -86,11 +93,11 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 		// drop point in this component.
 		go func() {
 			defer func() { <-t.semaphore }() // Release slot when done
-			_ = handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, in.Context)
+			_ = handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, OutMessage{Context: in.Context})
 		}()
 	default:
 		// Semaphore full - run synchronously to apply backpressure
-		return handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, in.Context)
+		return handler(trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx)), OutPort, OutMessage{Context: in.Context})
 	}
 	return module.Result{}
 }
@@ -112,7 +119,7 @@ func (t *Component) Ports() []module.Port {
 			Name:          OutPort,
 			Label:         "Out",
 			Source:        true,
-			Configuration: new(Context),
+			Configuration: new(OutMessage),
 			Position:      module.Right,
 		},
 	}

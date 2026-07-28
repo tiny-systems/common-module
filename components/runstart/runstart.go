@@ -36,6 +36,13 @@ type Started struct {
 // Place it on a CLASSIC (non-durable) node between the trigger and the
 // durable chain. Downstream nodes need no labels: every hop emitted under
 // the run identity rides the durable path.
+// OutMessage keeps the passthrough Context under a `context` key so a downstream
+// edge reads $.context.<field> — the mid-chain convention (same as the router,
+// pod_logs_get, llm_tools). Was emitting the raw Context value at root.
+type OutMessage struct {
+	Context Context `json:"context" configurable:"true" title:"Context" description:"Passthrough — the message, unchanged"`
+}
+
 type Component struct{}
 
 func (t *Component) Instance() module.Component {
@@ -63,7 +70,7 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 	// Fire the chain under a fresh run identity: this emit is durable
 	// (fire-and-forget) and returns once the hop is stored.
 	runCtx, runID := module.BeginRun(ctx)
-	if res := handler(runCtx, OutPort, in.Context); res.Err() != nil {
+	if res := handler(runCtx, OutPort, OutMessage{Context: in.Context}); res.Err() != nil {
 		return res
 	}
 
@@ -84,7 +91,7 @@ func (t *Component) Ports() []module.Port {
 			Name:          OutPort,
 			Label:         "Out",
 			Source:        true,
-			Configuration: new(Context),
+			Configuration: new(OutMessage),
 			Position:      module.Right,
 		},
 		{
