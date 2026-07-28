@@ -64,9 +64,9 @@ type Settings struct {
 }
 
 // Request is the input shape. Wire an error port that emits
-// {context, error, retryable} into this — the field names match the
-// llm_* / http_request / database error shape exactly so no transform
-// is needed.
+// {context, error, retryable} into this. That is the canonical
+// module.ErrorMessage shape (SDK), so any component built with
+// module.NewError conforms with no transform.
 type Request struct {
 	Context   Context `json:"context,omitempty" configurable:"true" title:"Context" description:"Original request payload — pass through unchanged so the loop can re-invoke the upstream component."`
 	Attempt   int     `json:"attempt" title:"Attempt" description:"Zero or absent on first arrival. Component increments it on every retry."`
@@ -113,7 +113,7 @@ func (c *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Retry",
-		Info:        "Explicit retry supervisor with bounded attempts and configurable backoff. Pairs with the error port of any component that emits {context, error, retryable} — currently llm_complete, llm_chat, llm_router, llm_tools. Stateless: attempt count rides in the payload, so the same component can supervise many concurrent flows without cross-talk.",
+		Info:        "Explicit retry supervisor with bounded attempts and configurable backoff. Pairs with the error port of any component that emits the canonical module.ErrorMessage shape {context, error, retryable} (build it with module.NewError; mark transient failures with module.Retryable). Any conforming component works — llm_*, http_request, and any third-party module that uses the SDK error contract. Stateless: attempt count rides in the payload, so the same component can supervise many concurrent flows without cross-talk.",
 		Tags:        []string{"SDK", "Resilience", "Backoff"},
 	}
 }
