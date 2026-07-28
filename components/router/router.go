@@ -65,6 +65,16 @@ type InMessage struct {
 	Conditions []Condition `json:"conditions" required:"true" title:"Conditions" minItems:"1" uniqueItems:"true"`
 }
 
+// OutMessage is what each out_<route> port emits. The passthrough Context is
+// kept UNDER a `context` key — same shape every other component uses — so a
+// downstream edge reads `$.context.<field>` consistently, instead of `$.field`
+// off a bare root. (Previously the port emitted the raw Context value at root,
+// which meant router branches were the one place you dropped the `.context`
+// segment — a silent mismatch that validated green but resolved null.)
+type OutMessage struct {
+	Context Context `json:"context" configurable:"true" title:"Context" description:"Passthrough — the routed message, unchanged"`
+}
+
 type Component struct {
 	settings Settings
 }
@@ -83,7 +93,7 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Router",
-		Info:        "Conditional message router. Configure routes via settings (e.g., routes=[\"POST\", \"OTHER\"]). Output ports are named out_<lowercase(route)> (e.g., out_post, out_other). Input: context (data to forward) + conditions array (each with route name and boolean). Routes context to FIRST condition where condition=true. If NO condition is true: with enableDefaultPort=true, routes to 'default' port (leave unwired to silently drop); with enableDefaultPort=false, returns an error to the caller. Prefer enableDefaultPort=true when unmatched messages should be ignored.",
+		Info:        "Conditional message router. Configure routes via settings (e.g., routes=[\"POST\", \"OTHER\"]). Output ports are named out_<lowercase(route)> (e.g., out_post, out_other). Input: context (data to forward) + conditions array (each with route name and boolean). Routes context to FIRST condition where condition=true. If NO condition is true: with enableDefaultPort=true, routes to 'default' port (leave unwired to silently drop); with enableDefaultPort=false, returns an error to the caller. Prefer enableDefaultPort=true when unmatched messages should be ignored. Each out_<route> emits the routed message under `context` — a downstream edge reads `$.context.<field>`.",
 		Tags:        []string{"SDK"},
 	}
 }
@@ -112,12 +122,12 @@ func (t *Component) Handle(ctx context.Context, handler module.Handler, port str
 			continue
 		}
 		if t.hasRoute(condition.RouteName.Value) {
-			return handler(ctx, getPortNameFromRoute(condition.RouteName.Value), in.Context)
+			return handler(ctx, getPortNameFromRoute(condition.RouteName.Value), OutMessage{Context: in.Context})
 		}
 		break
 	}
 	if t.settings.EnableDefaultPort {
-		return handler(ctx, DefaultPort, in.Context)
+		return handler(ctx, DefaultPort, OutMessage{Context: in.Context})
 	}
 	return module.Fail(fmt.Errorf("no matching route: %v", in.Conditions))
 }
@@ -156,7 +166,7 @@ func (t *Component) Ports() []module.Port {
 			Name:          getPortNameFromRoute(r),
 			Label:         strings.ToTitle(r),
 			Source:        true,
-			Configuration: new(Context),
+			Configuration: new(OutMessage),
 		})
 	}
 	if t.settings.EnableDefaultPort {
@@ -165,7 +175,7 @@ func (t *Component) Ports() []module.Port {
 			Name:          DefaultPort,
 			Label:         "Default",
 			Source:        true,
-			Configuration: new(Context),
+			Configuration: new(OutMessage),
 		})
 	}
 	return ports
