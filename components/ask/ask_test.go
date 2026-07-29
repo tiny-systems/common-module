@@ -107,3 +107,37 @@ func TestClosedGateIgnoresSubmission(t *testing.T) {
 		t.Error("closed gate became open on a stray submission")
 	}
 }
+
+// The Out port must advertise the form's field names, otherwise an edge that
+// reads a submitted value cannot be validated when the flow is built.
+func TestOutSampleMirrorsTheForm(t *testing.T) {
+	c := &Component{pending: map[string]interface{}{}}
+	c.settings.Form = `{"type":"object","properties":{
+		"approve":{"type":"boolean"},
+		"note":{"type":"string"},
+		"replicas":{"type":"number"}}}`
+
+	for _, p := range c.Ports() {
+		if p.Name != OutPort {
+			continue
+		}
+		reply, ok := p.Configuration.(Reply)
+		if !ok {
+			t.Fatalf("out configuration is %T, want Reply", p.Configuration)
+		}
+		for field, want := range map[string]interface{}{
+			"approve": false, "note": "", "replicas": 0,
+		} {
+			got, present := reply.Values[field]
+			if !present {
+				t.Errorf("out sample missing form field %q", field)
+				continue
+			}
+			if got != want {
+				t.Errorf("out sample %q = %v (%T), want %v (%T)", field, got, got, want, want)
+			}
+		}
+		return
+	}
+	t.Fatal("no out port published")
+}

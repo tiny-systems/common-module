@@ -188,6 +188,39 @@ func hasPressedButton(values map[string]interface{}) bool {
 	return false
 }
 
+// sampleValues builds an example submission from the authored form: one entry
+// per form field, holding the zero value of its declared type. Without it the
+// Out port would advertise a nil Values map, and an edge reading
+// `$.values.approve` could not be validated when the flow is built — the form's
+// field names are only knowable from the form itself.
+func sampleValues(form json.RawMessage) map[string]interface{} {
+	out := map[string]interface{}{}
+
+	var parsed struct {
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(form, &parsed); err != nil {
+		return out
+	}
+	for name, prop := range parsed.Properties {
+		switch prop.Type {
+		case "boolean":
+			out[name] = false
+		case "string":
+			out[name] = ""
+		case "number", "integer":
+			out[name] = 0
+		case "array":
+			out[name] = []interface{}{}
+		default:
+			out[name] = map[string]interface{}{}
+		}
+	}
+	return out
+}
+
 func (c *Component) control() map[string]interface{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -213,11 +246,14 @@ func (c *Component) Ports() []module.Port {
 			Configuration: Request{},
 		},
 		{
-			Name:          OutPort,
-			Label:         "Out",
-			Source:        true,
-			Position:      module.Right,
-			Configuration: Reply{},
+			Name:     OutPort,
+			Label:    "Out",
+			Source:   true,
+			Position: module.Right,
+			// Advertise the form's own fields as the example submission so a
+			// downstream edge reading `$.values.<field>` validates at build
+			// time instead of resolving to null at runtime.
+			Configuration: Reply{Values: sampleValues(c.form())},
 		},
 		{
 			Name:     v1alpha1.ControlPort,
