@@ -12,6 +12,7 @@ import (
 	_ "github.com/tiny-systems/common-module/components/cron"
 	_ "github.com/tiny-systems/common-module/components/debug"
 	_ "github.com/tiny-systems/common-module/components/delay"
+	_ "github.com/tiny-systems/common-module/components/flowtelemetry"
 	_ "github.com/tiny-systems/common-module/components/groupby"
 	_ "github.com/tiny-systems/common-module/components/inject"
 	_ "github.com/tiny-systems/common-module/components/kv"
