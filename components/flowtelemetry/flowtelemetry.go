@@ -34,6 +34,13 @@ const (
 	// maxTraces bounds the reply. A busy project can hold thousands of traces
 	// per hour, and the whole list would become one message.
 	maxTraces = 200
+	// maxScan bounds how many traces are examined while looking for matches.
+	// errorsOnly may have to read far past its results, and an unbounded scan
+	// would let one hop hold the window open over a busy project.
+	maxScan = 5000
+	// maxPages is a backstop against a collector that keeps answering with the
+	// same page: the loop would otherwise never end.
+	maxPages = 100
 
 	// otelStatsPort is the collector's statistics service, matching what the
 	// operator chart exposes and what the CLI connects to.
@@ -86,8 +93,13 @@ type Result struct {
 	// Spans is populated only for a single-trace request, so a flow can branch
 	// on which shape it asked for without a second field to check.
 	Spans       []Span `json:"spans,omitempty" title:"Spans" description:"Hops of the requested trace. Empty when listing."`
-	Total       int64  `json:"total" title:"Total" description:"Matching traces, before the reply was capped."`
-	ErrorTraces int    `json:"errorTraces" title:"Error Traces" description:"How many of the returned traces recorded an error."`
+	Total       int64  `json:"total" title:"Total" description:"Traces the collector holds for the window, before any filtering."`
+	ErrorTraces int    `json:"errorTraces" title:"Error Traces" description:"Traces with at least one error among those scanned."`
+	// Scanned and Truncated exist so a partial answer can never be mistaken for
+	// a complete one. errorsOnly reads past its results, and a caller deciding
+	// "nothing failed" deserves to know whether the whole window was examined.
+	Scanned   int  `json:"scanned" title:"Scanned" description:"Traces examined. Below total when the scan stopped early."`
+	Truncated bool `json:"truncated" title:"Truncated" description:"True when the scan stopped before the end of the window — treat an empty result as inconclusive, and narrow the window or the flow."`
 }
 
 type Component struct {
@@ -250,38 +262,81 @@ func (c *Component) list(ctx context.Context, handler module.Handler, svc *utils
 	end := time.Now()
 	start := end.Add(-time.Duration(lookback) * time.Minute)
 
-	resp, err := svc.GetTraces(ctx, ns, in.Project, in.Flow, start, end, 0)
-	if err != nil {
-		return c.handleError(ctx, handler, in.Context, module.Retryable(fmt.Errorf("list traces: %w", err)))
-	}
+	// Page through the window rather than reading one page. The collector
+	// returns traces regardless of outcome, so a failure sits wherever it
+	// happened to occur — filtering a single page would report "no errors" for a
+	// project whose only failure is on page two, the worst possible answer to
+	// the question this component exists to answer.
+	var (
+		traces     = make([]Trace, 0, maxTraces)
+		errorCount int
+		scanned    int
+		total      int64
+		offset     int64
+		truncated  bool
+		seen       = map[string]bool{}
+	)
 
-	traces := make([]Trace, 0, len(resp.Traces))
-	errorCount := 0
-	for _, t := range resp.Traces {
-		if in.ErrorsOnly && t.Errors == 0 {
-			continue
+	for page := 0; page < maxPages; page++ {
+		resp, err := svc.GetTraces(ctx, ns, in.Project, in.Flow, start, end, offset)
+		if err != nil {
+			return c.handleError(ctx, handler, in.Context, module.Retryable(fmt.Errorf("list traces: %w", err)))
 		}
-		if t.Errors > 0 {
-			errorCount++
+		total = resp.Total
+		if len(resp.Traces) == 0 {
+			break
 		}
+
+		for _, t := range resp.Traces {
+			// A collector that ignored the offset would otherwise return the
+			// same page forever and be counted repeatedly.
+			if seen[t.ID] {
+				continue
+			}
+			seen[t.ID] = true
+			scanned++
+
+			if in.ErrorsOnly && t.Errors == 0 {
+				continue
+			}
+			if t.Errors > 0 {
+				errorCount++
+			}
+			if len(traces) >= maxTraces {
+				continue
+			}
+			traces = append(traces, Trace{
+				ID:         t.ID,
+				Spans:      t.Spans,
+				Errors:     t.Errors,
+				DurationMs: t.Duration / int64(time.Millisecond),
+				// Start is microseconds since the epoch, matching what the
+				// collector records.
+				StartedAt: time.UnixMicro(t.Start).UTC().Format(time.RFC3339),
+			})
+		}
+
+		offset += int64(len(resp.Traces))
 		if len(traces) >= maxTraces {
-			continue
+			// Enough to return. Only claim completeness if nothing is left.
+			truncated = total > 0 && offset < total
+			break
 		}
-		traces = append(traces, Trace{
-			ID:         t.ID,
-			Spans:      t.Spans,
-			Errors:     t.Errors,
-			DurationMs: t.Duration / int64(time.Millisecond),
-			// Start is microseconds since the epoch, matching what the
-			// collector records.
-			StartedAt: time.UnixMicro(t.Start).UTC().Format(time.RFC3339),
-		})
+		if scanned >= maxScan {
+			truncated = true
+			break
+		}
+		if total > 0 && offset >= total {
+			break
+		}
 	}
 
 	return handler(ctx, ResultPort, Result{
 		Context:     in.Context,
 		Traces:      traces,
-		Total:       resp.Total,
+		Scanned:     scanned,
+		Truncated:   truncated,
+		Total:       total,
 		ErrorTraces: errorCount,
 	})
 }
