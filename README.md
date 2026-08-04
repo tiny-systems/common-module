@@ -17,8 +17,10 @@ Core building blocks for flow-based automations on the Tiny Systems platform.
 | Async | Non-blocking message passthrough (fire-and-forget) |
 | Split Array | Split an array into individual messages |
 | Inject | Data enrichment -- merge additional data into messages |
-| Modify | Transform and reshape message data |
-| Key-Value Store | In-memory key-value storage for flow state |
+| `transform` | Modify -- transform and reshape message data |
+| Key-Value Store | State-backed key-value storage for flow state -- records persist in the node's State and are multi-replica safe |
+| `run_start` | Start a durable run and reply immediately with the run id while the work continues |
+| `run_status` | Query a run's status by id -- complete, failed, or steps still pending |
 | Retry | Explicit retry supervisor with bounded attempts and configurable backoff. Wire to the error port of `llm_*` / `http_request` / database components; routes back to the original input until success or attempt limit. |
 | Ask a human | Presents a form and waits for a person to answer. The form is a JSON Schema you author, so the same component asks "approve this restart?" or "how many replicas?". Put it in front of anything destructive. |
 | Budget Guard | Bounds an agent loop by iterations, tokens and cost. Emits on `proceed` while within budget, `exceeded` once past it. |

@@ -18,7 +18,7 @@ type Context any
 
 type Request struct {
 	Context Context `json:"context" configurable:"true" title:"Context" description:"Arbitrary message to be delayed"`
-	Delay   int     `json:"delay" required:"true" title:"Component (ms)"`
+	Delay   int     `json:"delay" required:"true" title:"Delay (ms)"`
 }
 
 // OutMessage keeps the passthrough Context under a `context` key so a downstream

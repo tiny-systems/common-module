@@ -3,6 +3,7 @@ package kv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/tiny-systems/ajson"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/state"
 	"github.com/tiny-systems/module/registry"
 )
 
@@ -53,7 +55,7 @@ func (d Document) PrepareJSONSchema(schema *jsonschema.Schema) error {
 type Settings struct {
 	Document       Document `json:"document,omitempty" type:"object" required:"true" title:"Document" description:"Structure of stored documents. Values are arbitrary. Make sure the document has the primary key defined below." configurable:"true"`
 	PrimaryKey     string   `json:"primaryKey" title:"Primary Key" required:"true" default:"id"`
-	MaxRecords     int      `json:"maxRecords" title:"Max Records" description:"Maximum number of records (0 = default 100)" default:"100"`
+	MaxRecords     int      `json:"maxRecords" title:"Max Records" description:"Maximum number of records (0 = default 100). The real ceiling is the node's ~900KB total state byte budget, not the record count." default:"100"`
 	EnableStoreAck bool     `json:"enableStoreAckPort" required:"true" title:"Enable Store Ack Port" description:"Emits acknowledgment after store/delete operations"`
 }
 
@@ -263,6 +265,9 @@ func (c *Component) handleStore(ctx context.Context, handler module.Handler, req
 		}
 
 		if err := c.State().Set(ctx, pkStr, data); err != nil {
+			if errors.Is(err, state.ErrStateTooLarge) {
+				return module.Fail(fmt.Errorf("state budget exhausted: the node's total state is capped at ~900KB; store smaller records or lower maxRecords: %v", err))
+			}
 			return module.Fail(fmt.Errorf("state.Set: %v", err))
 		}
 
