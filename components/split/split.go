@@ -25,6 +25,8 @@ type InMessage struct {
 type OutMessage struct {
 	Context Context     `json:"context"`
 	Item    ItemContext `json:"item" shared:"true"`
+	Index   int         `json:"index" title:"Index" description:"0-based position of this item in the source array"`
+	Total   int         `json:"total" title:"Total" description:"Number of items in the source array"`
 }
 
 type Component struct {
@@ -38,17 +40,20 @@ func (t *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Split Array",
-		Info:        "Array iterator. Input: context + array. Emits one message per array element on Out, each containing {context, item}. Elements are processed sequentially - next item sent after previous Out completes. Use to process lists item by item.",
+		Info:        "Array iterator. Input: context + array. Emits one message per array element on Out, each containing {context, item, index, total} — index is the element's 0-based position, total the array length, context the incoming message's context passed through unchanged per item. Elements are processed sequentially - next item sent after previous Out completes. Use to process lists item by item. For map-reduce, pair with `collect`: route each item through the per-item work, map index/total (and a group key unique per source message) into collect, and it reassembles the array once all items arrive.",
 		Tags:        []string{"SDK", "ARRAY"},
 	}
 }
 
 func (t *Component) Handle(ctx context.Context, handler module.Handler, _ string, msg interface{}) module.Result {
 	if in, ok := msg.(InMessage); ok {
-		for _, item := range in.Array {
+		total := len(in.Array)
+		for idx, item := range in.Array {
 			r := handler(ctx, OutPort, OutMessage{
 				Context: in.Context,
 				Item:    item,
+				Index:   idx,
+				Total:   total,
 			})
 			if r.IsErr() {
 				return r

@@ -58,7 +58,6 @@ func TestSplit_Handle(t1 *testing.T) {
 				}()
 
 				var resp = func(ctx context.Context, port string, data interface{}) module.Result {
-					counter++
 					if port != OutPort {
 						t1.Fatalf("invalid output port: %v", port)
 					}
@@ -69,6 +68,13 @@ func TestSplit_Handle(t1 *testing.T) {
 					if !reflect.DeepEqual(resp.Context, msg.Context) {
 						t1.Errorf("input and output context are not equal")
 					}
+					if resp.Index != counter {
+						t1.Errorf("index: got %d, want %d", resp.Index, counter)
+					}
+					if resp.Total != length {
+						t1.Errorf("total: got %d, want %d", resp.Total, length)
+					}
+					counter++
 					if resp.Item == 1 || resp.Item == 2 || resp.Item == 5 {
 						//all good
 						return module.Result{}

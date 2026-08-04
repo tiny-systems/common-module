@@ -10,6 +10,7 @@ import (
 	_ "github.com/tiny-systems/common-module/components/ask"
 	_ "github.com/tiny-systems/common-module/components/async"
 	_ "github.com/tiny-systems/common-module/components/budgetguard"
+	_ "github.com/tiny-systems/common-module/components/collect"
 	_ "github.com/tiny-systems/common-module/components/cron"
 	_ "github.com/tiny-systems/common-module/components/debug"
 	_ "github.com/tiny-systems/common-module/components/delay"

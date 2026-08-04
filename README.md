@@ -15,7 +15,8 @@ Core building blocks for flow-based automations on the Tiny Systems platform.
 | Ticker | Interval-based recurring trigger |
 | Group By | Group incoming messages by key |
 | Async | Non-blocking message passthrough (fire-and-forget) |
-| Split Array | Split an array into individual messages |
+| Split Array | Split an array into individual messages, each carrying `index` and `total` for downstream fan-in |
+| Collect | Fan-in counterpart to `array_split` -- buffers items per group key in the node's State and emits the reassembled, index-ordered array once all `total` items arrive; incomplete groups time out onto the error port |
 | Inject | Data enrichment -- merge additional data into messages |
 | `transform` | Modify -- transform and reshape message data |
 | Key-Value Store | State-backed key-value storage for flow state -- records persist in the node's State and are multi-replica safe |
@@ -37,6 +38,12 @@ pretty — a dedicated form widget is not built yet. Because `build_flow`
 validates against the component catalog rather than a node's live settings,
 edges reading a custom form's own fields need a follow-up `configure_edge` once
 the node has reconciled.
+
+**`collect` expires passively.** Group timeouts are checked when messages
+arrive, not on a background timer — an idle node holds stragglers until the
+next message on any group. Map a group key that is unique per fan-out (e.g.
+`$.context.runId`) and enable the error port in production; without it,
+timed-out groups are dropped with only a log line.
 
 **`budget_guard` only counts if you thread its counters back.** Map
 `iteration` / `spentTokens` / `spentUSD` from `proceed` into the guard on each
