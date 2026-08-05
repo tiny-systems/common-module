@@ -23,7 +23,7 @@ Core building blocks for flow-based automations on the Tiny Systems platform.
 | `run_start` | Start a durable run and reply immediately with the run id while the work continues |
 | `run_status` | Query a run's status by id -- complete, failed, or steps still pending |
 | Retry | Explicit retry supervisor with bounded attempts and configurable backoff. Wire to the error port of `llm_*` / `http_request` / database components; routes back to the original input until success or attempt limit. |
-| Ask a human | Presents a form and waits for a person to answer. The form is a JSON Schema you author, so the same component asks "approve this restart?" or "how many replicas?". Put it in front of anything destructive. |
+| Ask a human | Presents a form and waits for a person to answer. The form is a JSON Schema you author, so the same component asks "approve this restart?" or "how many replicas?". Concurrent questions queue FIFO and persist in the node's State across restarts; unanswered questions can time out onto the error port. Put it in front of anything destructive. |
 | Budget Guard | Bounds an agent loop by iterations, tokens and cost. Emits on `proceed` while within budget, `exceeded` once past it. |
 | Flow Telemetry | Reads the platform's own execution traces, so a flow can inspect how flows are running — list runs in a window, or fetch one run's hops to find where it broke. |
 
@@ -32,6 +32,17 @@ Core building blocks for flow-based automations on the Tiny Systems platform.
 **`ask` does not park the run.** A request publishes the form and returns; the
 answer arrives later as a separate hop and starts the downstream branch itself.
 Continuity is the published form, not a held message.
+
+**`ask` queues and persists questions.** The control widget renders one form
+per node, so concurrent requests queue FIFO: the oldest question is presented
+first and answering it reveals the next (the form notes how many wait behind
+it). Pending questions live in the node's State — same backing as `kv` and
+`collect` — so they survive pod restarts and are multi-replica safe. With
+`timeoutSeconds` set (0 = wait forever, the default), unanswered questions
+expire onto the error port as `{context, error}`. Expiry is passive, checked
+on traffic and on reconcile ticks — a fully idle node holds an expired
+question until the next event. Enable the error port when a timeout is set;
+without it expired questions are dropped with only a log line.
 
 **`ask` renders through the generic JSON editor.** It is functional rather than
 pretty — a dedicated form widget is not built yet. Because `build_flow`
