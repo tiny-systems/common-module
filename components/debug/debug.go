@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/tiny-systems/module/api/v1alpha1"
 	"github.com/tiny-systems/module/module"
+	"github.com/tiny-systems/module/pkg/redact"
 	"github.com/tiny-systems/module/registry"
 )
 
@@ -63,7 +64,13 @@ func (t *Component) Handle(ctx context.Context, _ module.Handler, port string, m
 	if !ok {
 		return module.Fail(fmt.Errorf("invalid message in"))
 	}
-	t.settings.Context = map[string]interface{}(in)
+	// Mask credentials before the message becomes node state. What lands
+	// here is displayed on the dashboard, stored in the TinyNode CR, and
+	// carried into any export of the project — an agent flow's context
+	// holds an API key on every hop, and one reached a public solution
+	// export this way. Debug shows you the data, not your secrets.
+	redacted, _ := redact.Secrets(map[string]interface{}(in)).(map[string]interface{})
+	t.settings.Context = redacted
 	t.Emit(ctx, v1alpha1.ReconcilePort, nil)
 	return module.Result{}
 }
