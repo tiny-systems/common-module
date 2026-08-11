@@ -531,19 +531,16 @@ func (c *Component) control() map[string]interface{} {
 func (c *Component) controlSchema() json.RawMessage {
 	head, n := c.head(context.Background())
 	if head == nil {
-		// Idle: say so, and offer no answers.
+		// Idle: publish the authored form, but gated so its fields hide
+		// themselves. The form's shape stays advertised on the port (useful
+		// when authoring), while the widget shows only the notice — a person
+		// reading the dashboard can tell a waiting decision from an idle gate,
+		// which is the one thing this component exists to communicate.
 		//
-		// This used to publish the authored form verbatim, so the widget
-		// showed Approve/Deny at all times — buttons that answer a question
-		// nobody asked. A person reading the dashboard cannot tell a waiting
-		// decision from an idle gate, which is the one thing this component
-		// exists to communicate.
-		//
-		// The cost is that an idle node no longer advertises the shape of the
-		// answer form on this port; it appears the moment a question does.
-		// Nothing wires FROM the control port — it is the widget surface — so
-		// the shape matters to a human reading it, not to the graph.
-		return idleSchema()
+		// The gate is `requiredWhen` on each answer field, keyed to the
+		// question-id field: the editor already treats a false condition as
+		// "hidden", so this needs no rendering support of its own.
+		return gateFormOnPendingQuestion(c.form())
 	}
 	base := head.Form
 	if len(base) == 0 {
@@ -655,23 +652,59 @@ const statusField = "_status"
 
 const idleMessage = "Nothing to approve right now."
 
-// idleSchema renders the notice as read-only prose with no submit controls.
-func idleSchema() json.RawMessage {
-	return json.RawMessage(`{
-  "$defs": {
-    "Control": {
-      "type": "object",
-      "properties": {
-        "` + statusField + `": {
-          "type": "string",
-          "title": "",
-          "readonly": true,
-          "format": "markdown",
-          "propertyOrder": 1
-        }
-      }
-    }
-  },
-  "$ref": "#/$defs/Control"
-}`)
+// gateFormOnPendingQuestion returns the form with every field hidden until a
+// question exists, plus the idle notice.
+//
+// Hiding is expressed as requiredWhen [qidField, "isUndefined"] inverted: a
+// field is shown only when the question id is PRESENT. The editor evaluates
+// the condition against sibling values and treats false as hidden, so an idle
+// widget renders the notice alone. When a question arrives the form is
+// published with its id set and the fields appear.
+func gateFormOnPendingQuestion(base json.RawMessage) json.RawMessage {
+	var doc map[string]interface{}
+	if err := json.Unmarshal(base, &doc); err != nil {
+		return base // an unrenderable gate is worse than an ungated form
+	}
+	props, ok := doc["properties"].(map[string]interface{})
+	if !ok {
+		return base
+	}
+	for name, raw := range props {
+		field, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		// Hidden on this branch. The condition vocabulary can express
+		// "equals", "in" and "isUndefined" — there is no "is defined" — and
+		// this schema is only ever published when NO question is pending, so
+		// a condition that cannot hold is exactly the intent: hide the
+		// answers. The ungated form is published the moment a question
+		// arrives, by the other branch.
+		field["requiredWhen"] = []interface{}{qidField, "===", neverMatches}
+		props[name] = field
+	}
+	props[statusField] = map[string]interface{}{
+		"type":          "string",
+		"title":         "",
+		"readonly":      true,
+		"format":        "markdown",
+		"propertyOrder": 0,
+		"requiredWhen":  []interface{}{qidField, "isUndefined"},
+	}
+	props[qidField] = map[string]interface{}{
+		"type":     "string",
+		"readonly": true,
+		"title":    "",
+	}
+	doc["properties"] = props
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return base
+	}
+	return out
 }
+
+// neverMatches is a value the question-id field never carries, used to force
+// a condition false and so hide a field. Named for what it does rather than
+// pretending to describe a real state.
+const neverMatches = "\x00never"

@@ -3,6 +3,7 @@ package ask
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -149,11 +150,29 @@ func TestControlPortPublishesFormAsSchema(t *testing.T) {
 		if p.Name != v1alpha1.ControlPort {
 			continue
 		}
-		if !strings.Contains(string(p.Schema), statusField) {
-			t.Errorf("idle control schema = %s, want the idle notice", p.Schema)
+		var doc struct {
+			Properties map[string]map[string]interface{} `json:"properties"`
 		}
-		if strings.Contains(string(p.Schema), `"format":"button"`) {
-			t.Errorf("idle control schema offers answers: %s", p.Schema)
+		if err := json.Unmarshal(p.Schema, &doc); err != nil {
+			t.Fatalf("idle control schema is not JSON: %s", p.Schema)
+		}
+		// The notice shows precisely while no question is pending.
+		status, ok := doc.Properties[statusField]
+		if !ok {
+			t.Fatalf("idle control schema carries no notice: %s", p.Schema)
+		}
+		if got := fmt.Sprint(status["requiredWhen"]); got != fmt.Sprint([]interface{}{qidField, "isUndefined"}) {
+			t.Errorf("notice gate = %v, want shown while no question is pending", got)
+		}
+		// The answer field is still ADVERTISED (so the port keeps describing
+		// what will be asked) but gated off, so the widget offers no buttons
+		// until a question exists.
+		answer, ok := doc.Properties["go"]
+		if !ok {
+			t.Fatalf("authored form field missing from idle schema: %s", p.Schema)
+		}
+		if answer["requiredWhen"] == nil {
+			t.Errorf("answer field is not gated, so the widget offers it while idle: %v", answer)
 		}
 		// The data half must be a non-nil map: the runtime decodes an incoming
 		// submission into reflect.TypeOf(Configuration), and a nil map has no
