@@ -20,6 +20,7 @@ import (
 	_ "github.com/tiny-systems/common-module/components/inject"
 	_ "github.com/tiny-systems/common-module/components/kv"
 	_ "github.com/tiny-systems/common-module/components/modify"
+	_ "github.com/tiny-systems/common-module/components/prompt"
 	_ "github.com/tiny-systems/common-module/components/retry"
 	_ "github.com/tiny-systems/common-module/components/router"
 	_ "github.com/tiny-systems/common-module/components/runstart"
