@@ -517,7 +517,7 @@ func (c *Component) head(ctx context.Context) (*pendingQuestion, int) {
 func (c *Component) control() map[string]interface{} {
 	head, _ := c.head(context.Background())
 	if head == nil {
-		return map[string]interface{}{}
+		return map[string]interface{}{statusField: idleMessage}
 	}
 	return map[string]interface{}{
 		"context": head.Context,
@@ -531,7 +531,19 @@ func (c *Component) control() map[string]interface{} {
 func (c *Component) controlSchema() json.RawMessage {
 	head, n := c.head(context.Background())
 	if head == nil {
-		return c.form()
+		// Idle: say so, and offer no answers.
+		//
+		// This used to publish the authored form verbatim, so the widget
+		// showed Approve/Deny at all times — buttons that answer a question
+		// nobody asked. A person reading the dashboard cannot tell a waiting
+		// decision from an idle gate, which is the one thing this component
+		// exists to communicate.
+		//
+		// The cost is that an idle node no longer advertises the shape of the
+		// answer form on this port; it appears the moment a question does.
+		// Nothing wires FROM the control port — it is the widget surface — so
+		// the shape matters to a human reading it, not to the graph.
+		return idleSchema()
 	}
 	base := head.Form
 	if len(base) == 0 {
@@ -635,4 +647,31 @@ var (
 
 func init() {
 	registry.Register((&Component{}).Instance())
+}
+
+// statusField carries the idle notice. Named so it cannot collide with an
+// authored form field: those are the answers.
+const statusField = "_status"
+
+const idleMessage = "Nothing to approve right now."
+
+// idleSchema renders the notice as read-only prose with no submit controls.
+func idleSchema() json.RawMessage {
+	return json.RawMessage(`{
+  "$defs": {
+    "Control": {
+      "type": "object",
+      "properties": {
+        "` + statusField + `": {
+          "type": "string",
+          "title": "",
+          "readonly": true,
+          "format": "markdown",
+          "propertyOrder": 1
+        }
+      }
+    }
+  },
+  "$ref": "#/$defs/Control"
+}`)
 }

@@ -138,8 +138,10 @@ func TestFormFallsBackToApproveDeny(t *testing.T) {
 }
 
 func TestControlPortPublishesFormAsSchema(t *testing.T) {
-	// No pending question: the port must advertise the authored form verbatim
-	// (no injected fields) so an idle node shows exactly what will be asked.
+	// No pending question: the port must say it is idle and offer NO answers.
+	// It used to publish the authored form verbatim, which meant the widget
+	// showed Approve/Deny at all times — buttons answering a question nobody
+	// asked, and no way to tell a waiting decision from an idle gate.
 	c := &Component{}
 	c.settings.Form = `{"type":"object","properties":{"go":{"type":"boolean","format":"button"}}}`
 
@@ -147,8 +149,11 @@ func TestControlPortPublishesFormAsSchema(t *testing.T) {
 		if p.Name != v1alpha1.ControlPort {
 			continue
 		}
-		if string(p.Schema) != c.settings.Form {
-			t.Errorf("control schema = %s, want the authored form", p.Schema)
+		if !strings.Contains(string(p.Schema), statusField) {
+			t.Errorf("idle control schema = %s, want the idle notice", p.Schema)
+		}
+		if strings.Contains(string(p.Schema), `"format":"button"`) {
+			t.Errorf("idle control schema offers answers: %s", p.Schema)
 		}
 		// The data half must be a non-nil map: the runtime decodes an incoming
 		// submission into reflect.TypeOf(Configuration), and a nil map has no
@@ -280,8 +285,10 @@ func TestTwoConcurrentQuestionsBothAnswerable(t *testing.T) {
 	if n := stateKeys(h); n != 0 {
 		t.Errorf("drained queue must not leak state, %d keys left: %+v", n, h.Metadata)
 	}
-	if ctl := comp.control(); len(ctl) != 0 {
-		t.Errorf("drained queue should publish an empty control map, got %+v", ctl)
+	// Drained: the widget shows the idle notice and, critically, no longer
+	// carries a question id — nothing stale is answerable.
+	if ctl := comp.control(); ctl[statusField] != idleMessage || ctl[qidField] != nil {
+		t.Errorf("drained queue should publish only the idle notice, got %+v", ctl)
 	}
 }
 
@@ -419,8 +426,8 @@ func TestTimeoutExpiryOnReconcile(t *testing.T) {
 	if len(ctls) != 1 {
 		t.Fatalf("expected the cleared form to be republished, got %d control emits", len(ctls))
 	}
-	if m := ctls[0].(map[string]interface{}); len(m) != 0 {
-		t.Errorf("cleared form should be empty, got %+v", m)
+	if m := ctls[0].(map[string]interface{}); m[statusField] != idleMessage || m[qidField] != nil {
+		t.Errorf("cleared form should publish only the idle notice, got %+v", m)
 	}
 	if n := stateKeys(h); n != 0 {
 		t.Errorf("expired question must be deleted from state, %d keys left", n)
