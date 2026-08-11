@@ -674,13 +674,11 @@ func gateFormOnPendingQuestion(base json.RawMessage) json.RawMessage {
 		if !ok {
 			continue
 		}
-		// Hidden on this branch. The condition vocabulary can express
-		// "equals", "in" and "isUndefined" — there is no "is defined" — and
-		// this schema is only ever published when NO question is pending, so
-		// a condition that cannot hold is exactly the intent: hide the
-		// answers. The ungated form is published the moment a question
-		// arrives, by the other branch.
-		field["requiredWhen"] = []interface{}{qidField, "===", neverMatches}
+		// Shown only when the idle notice is absent. The notice exists
+		// exactly while nothing is pending, so "no notice" is the same
+		// statement as "a question is waiting" — expressed with the one
+		// operator the vocabulary has for presence.
+		field["requiredWhen"] = []interface{}{statusField, "isUndefined"}
 		props[name] = field
 	}
 	props[statusField] = map[string]interface{}{
@@ -691,10 +689,14 @@ func gateFormOnPendingQuestion(base json.RawMessage) json.RawMessage {
 		"propertyOrder": 0,
 		"requiredWhen":  []interface{}{qidField, "isUndefined"},
 	}
+	// The question id rides along so a submission says which question it
+	// answers, but it is bookkeeping — hidden with the answers it belongs to,
+	// rather than shown as an empty box on an idle dashboard.
 	props[qidField] = map[string]interface{}{
-		"type":     "string",
-		"readonly": true,
-		"title":    "",
+		"type":         "string",
+		"readonly":     true,
+		"title":        "",
+		"requiredWhen": []interface{}{statusField, "isUndefined"},
 	}
 	doc["properties"] = props
 	out, err := json.Marshal(doc)
@@ -703,8 +705,3 @@ func gateFormOnPendingQuestion(base json.RawMessage) json.RawMessage {
 	}
 	return out
 }
-
-// neverMatches is a value the question-id field never carries, used to force
-// a condition false and so hide a field. Named for what it does rather than
-// pretending to describe a real state.
-const neverMatches = "\x00never"
