@@ -43,8 +43,8 @@ func waitOut(t *testing.T, h *testharness.Harness, n int) []any {
 func TestPromptRoundTrip(t *testing.T) {
 	h, comp := newPrompt(t)
 
-	// Idle: form shown, no working line, no answer.
-	if ctl := comp.control(comp.load(leaderCtx())); ctl[statusField] != nil || ctl[answerField] != nil {
+	// Idle: form shown, nothing in the answer panel.
+	if ctl := comp.control(comp.load(leaderCtx())); ctl[answerField] != nil {
 		t.Fatalf("idle control should be empty, got %+v", ctl)
 	}
 
@@ -71,19 +71,19 @@ func TestPromptRoundTrip(t *testing.T) {
 		t.Error("the submit button leaked into the emitted values")
 	}
 
-	// Widget is now WORKING: the status line is present, which is the
-	// feedback a bare signal widget never gave.
+	// Widget is now WORKING: the answer panel shows the working line, which is
+	// the feedback a bare signal widget never gave.
 	s := comp.load(leaderCtx())
 	if !s.Pending {
 		t.Fatal("session is not pending after submit")
 	}
-	if comp.control(s)[statusField] != workingMessage {
-		t.Errorf("working control has no status line: %+v", comp.control(s))
+	if comp.control(s)[answerField] != workingMessage {
+		t.Errorf("working control has no working line: %+v", comp.control(s))
 	}
-	// And the form fields gate off while working.
+	// The form and submit button are always present so a person can ask again.
 	sch := string(comp.controlSchema(s))
-	if !strings.Contains(sch, `"requiredWhen":["_status","isUndefined"]`) {
-		t.Errorf("form fields are not gated on idle: %s", sch)
+	if !strings.Contains(sch, `"question"`) || !strings.Contains(sch, `"format":"button"`) {
+		t.Errorf("form or submit button missing from schema: %s", sch)
 	}
 
 	// A stale answer (wrong id) is ignored.
@@ -102,9 +102,6 @@ func TestPromptRoundTrip(t *testing.T) {
 	}
 	if comp.control(s)[answerField] != "**All healthy.**" {
 		t.Errorf("answer not shown in widget: %+v", comp.control(s))
-	}
-	if comp.control(s)[statusField] != nil {
-		t.Error("working line still present after the answer")
 	}
 }
 

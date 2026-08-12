@@ -39,15 +39,8 @@ const (
 	// a queue.
 	sessionKey = "session"
 
-	// ridField round-trips the request id through the flow so a returning
-	// answer proves which submission it belongs to. Declared (not hidden)
-	// because the editor prunes form keys absent from the schema; hidden from
-	// the person by a gate, since it is bookkeeping.
-	ridField = "_rid"
-	// statusField carries the "working…" line while a request is outstanding.
-	// Its PRESENCE is the discriminator the form fields gate on.
-	statusField = "_status"
-	// answerField shows the last response, rendered as markdown.
+	// answerField carries the feedback shown to the person: "working…" while
+	// a request is outstanding, then the response, rendered as markdown.
 	answerField = "_answer"
 	// submitField is the button that fires a submission.
 	submitField = "submit"
@@ -157,15 +150,19 @@ func (c *Component) save(ctx context.Context, s session) error {
 	return st.Set(ctx, sessionKey, data)
 }
 
-// Handle receives the answer coming back on In. It also handles the Out/In
-// ports the runtime dispatches here; the submission itself arrives via
-// OnControl (the widget), not Handle.
+// Handle receives the answer coming back on In. The submission itself arrives
+// via OnControl (the widget), not here.
+//
+// This does NOT gate on utils.IsLeader: the answer is routed to whichever
+// instance the runtime picks, and its context is not the leader context the
+// control/reconcile paths run under. Gating here silently drops every answer —
+// the widget hangs on "working…" forever. State writes converge across
+// replicas through the shared metadata backend, so a non-leader handling the
+// answer is correct. (OnControl and OnReconcile DO gate on leader — those are
+// the widget and reconcile paths, which must run once.)
 func (c *Component) Handle(ctx context.Context, _ module.Handler, port string, msg any) module.Result {
 	if port != InPort {
 		return module.Fail(fmt.Errorf("unknown port: %s", port))
-	}
-	if !utils.IsLeader(ctx) {
-		return module.Result{}
 	}
 	in, ok := msg.(In)
 	if !ok {
@@ -175,6 +172,8 @@ func (c *Component) Handle(ctx context.Context, _ module.Handler, port string, m
 	s := c.load(ctx)
 	// Only the outstanding request may be answered; a late reply to a
 	// superseded question is dropped rather than shown against the wrong one.
+	// An empty request id means the flow chose not to correlate — accept it
+	// against whatever is outstanding.
 	if !s.Pending || (in.RequestID != "" && in.RequestID != s.RequestID) {
 		return module.Result{}
 	}
@@ -209,7 +208,7 @@ func (c *Component) OnControl(ctx context.Context, msg any) error {
 	values := map[string]interface{}{}
 	for k, v := range form {
 		switch k {
-		case submitField, ridField, statusField, answerField:
+		case submitField, answerField:
 			continue
 		}
 		values[k] = v
@@ -249,11 +248,10 @@ func (c *Component) OnReconcile(ctx context.Context, _ v1alpha1.TinyNode) error 
 // control is the data half of the widget for the current session.
 func (c *Component) control(s session) map[string]interface{} {
 	out := map[string]interface{}{}
-	if s.Pending {
-		out[statusField] = workingMessage
-		out[ridField] = s.RequestID
-	}
-	if s.Answer != "" {
+	switch {
+	case s.Pending:
+		out[answerField] = workingMessage
+	case s.Answer != "":
 		out[answerField] = s.Answer
 	}
 	return out
@@ -273,30 +271,19 @@ func (c *Component) controlSchema(s session) json.RawMessage {
 		props = map[string]interface{}{}
 	}
 
-	// Input fields and Submit are hidden while a request is outstanding — the
-	// person cannot fire a second one over an in-flight one.
-	gateIdle := []interface{}{statusField, "isUndefined"}
-	for name, raw := range props {
-		if field, ok := raw.(map[string]interface{}); ok {
-			field["requiredWhen"] = gateIdle
-			props[name] = field
-		}
-	}
+	// The form is always visible; the answer field carries the feedback —
+	// "Working on it…" while a request is outstanding, then the response.
+	// Empty renders as nothing (see MarkdownView), so an idle widget is just
+	// the form. Gating the form on a sibling's presence proved fragile: the
+	// editor pre-fills missing schema fields, so an isUndefined gate never
+	// holds and the whole form vanishes.
 	props[submitField] = map[string]interface{}{
 		"type": "boolean", "title": "Submit", "format": "button",
-		"propertyOrder": 100, "requiredWhen": gateIdle,
-	}
-	props[statusField] = map[string]interface{}{
-		"type": "string", "title": "", "readonly": true, "format": "markdown",
-		"propertyOrder": 0,
+		"propertyOrder": 100,
 	}
 	props[answerField] = map[string]interface{}{
-		"type": "string", "title": "Answer", "readonly": true, "format": "markdown",
+		"type": "string", "title": "", "readonly": true, "format": "markdown",
 		"propertyOrder": 200,
-	}
-	props[ridField] = map[string]interface{}{
-		"type": "string", "readonly": true, "title": "",
-		"requiredWhen": []interface{}{statusField, "isUndefined"},
 	}
 	doc["properties"] = props
 	out, err := json.Marshal(doc)
