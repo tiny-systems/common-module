@@ -285,6 +285,25 @@ func (c *Component) controlSchema(s session) json.RawMessage {
 		"type": "string", "title": "", "readonly": true, "format": "markdown",
 		"propertyOrder": 200,
 	}
+
+	// While a request is outstanding, lock the whole form: every input and the
+	// Submit button go readonly so the person can neither edit their question
+	// nor fire a second request over the in-flight one — they wait for the
+	// answer. This is the dynamic-schema approach: the schema itself changes
+	// with the session state, and the widget re-renders it when `control`'s
+	// data changes on submit.
+	if s.Pending {
+		for name, raw := range props {
+			if name == answerField {
+				continue // already a readonly display
+			}
+			if field, ok := raw.(map[string]interface{}); ok {
+				field["readonly"] = true
+				props[name] = field
+			}
+		}
+	}
+
 	doc["properties"] = props
 	out, err := json.Marshal(doc)
 	if err != nil {

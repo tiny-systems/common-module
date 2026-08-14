@@ -85,6 +85,35 @@ func TestPromptRoundTrip(t *testing.T) {
 	if !strings.Contains(sch, `"question"`) || !strings.Contains(sch, `"format":"button"`) {
 		t.Errorf("form or submit button missing from schema: %s", sch)
 	}
+	// While pending, the whole form is LOCKED: every field carries readonly so
+	// the widget disables it. The question field and the submit button must both
+	// be readonly; the person waits for the answer rather than editing or
+	// re-firing over the in-flight request.
+	var pendingDoc struct {
+		Properties map[string]struct {
+			Readonly bool `json:"readonly"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(comp.controlSchema(s), &pendingDoc); err != nil {
+		t.Fatalf("pending schema not valid json: %v", err)
+	}
+	if !pendingDoc.Properties["question"].Readonly {
+		t.Error("question field is not readonly while pending — form not locked")
+	}
+	if !pendingDoc.Properties[submitField].Readonly {
+		t.Error("submit button is not readonly while pending — can re-fire over an in-flight request")
+	}
+	// And once answered, the form unlocks again.
+	answered := session{Pending: false, Answer: "done"}
+	var answeredDoc struct {
+		Properties map[string]struct {
+			Readonly bool `json:"readonly"`
+		} `json:"properties"`
+	}
+	_ = json.Unmarshal(comp.controlSchema(answered), &answeredDoc)
+	if answeredDoc.Properties["question"].Readonly {
+		t.Error("question field stayed readonly after the answer — form never unlocked")
+	}
 
 	// A stale answer (wrong id) is ignored.
 	h.Handle(leaderCtx(), InPort, In{RequestID: "not-the-one", Answer: "stale"})
