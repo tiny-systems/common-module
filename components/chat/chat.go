@@ -536,9 +536,10 @@ func (c *Component) controlAnswer(ctx context.Context, values map[string]interfa
 		t = c.loadThread(ctx)
 		entries := expiredNotes(expired, now)
 		if answered != nil {
-			answerValues := cleanValues(values)
 			// The question card stops pending; the human's decision joins the
-			// thread as its own entry.
+			// thread as its own entry — with write-only fields masked, since
+			// the thread persists in state and renders in the widget. The raw
+			// values travel only on the Answer port below.
 			for i := range t {
 				if t[i].Kind == "question" && t[i].QID == answered.ID {
 					t[i].Pending = false
@@ -546,7 +547,7 @@ func (c *Component) controlAnswer(ctx context.Context, values map[string]interfa
 			}
 			entries = append(entries, threadEntry{
 				ID: newID("a", now), Kind: kindAnswer, QID: answered.ID,
-				Values: answerValues, At: now,
+				Values: maskSecrets(cleanValues(values), secretFields(answered.Form)), At: now,
 			})
 		}
 		t = appendCapped(t, c.limit(), entries...)
@@ -578,6 +579,56 @@ func cleanValues(values map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(values))
 	for k, v := range values {
 		if k == kindField || k == qidField || k == textField {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// secretMask is what a write-only submission value becomes everywhere the
+// conversation is persisted or displayed. The raw value exists only in the
+// one Answer emission the flow consumes.
+const secretMask = "••••••"
+
+// secretFields reads the question form and returns the names of fields whose
+// submitted values must never persist: standard JSON Schema `writeOnly`,
+// `format: "password"`, or the editor's legacy `secret` keyword.
+func secretFields(form json.RawMessage) map[string]bool {
+	var parsed struct {
+		Properties map[string]struct {
+			WriteOnly bool   `json:"writeOnly"`
+			Format    string `json:"format"`
+			Secret    bool   `json:"secret"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(form, &parsed); err != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for name, p := range parsed.Properties {
+		if p.WriteOnly || p.Secret || p.Format == "password" {
+			out[name] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// maskSecrets returns a copy of values with every secret field's non-empty
+// value replaced by secretMask. The thread is a display buffer that persists
+// in node state and re-renders in the widget — a credential must not survive
+// there ([[never in transcript]] is a persistence rule).
+func maskSecrets(values map[string]interface{}, secrets map[string]bool) map[string]interface{} {
+	if len(secrets) == 0 {
+		return values
+	}
+	out := make(map[string]interface{}, len(values))
+	for k, v := range values {
+		if secrets[k] && v != nil && v != "" {
+			out[k] = secretMask
 			continue
 		}
 		out[k] = v

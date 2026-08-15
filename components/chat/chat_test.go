@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -300,5 +302,77 @@ func TestRestartRehydratesConversation(t *testing.T) {
 	}
 	if control["pendingQuestion"] == nil {
 		t.Fatal("pending question lost across restart")
+	}
+}
+
+// ---- secrets (writeOnly / password fields) ----------------------------------
+
+func TestSecretAnswerMaskedInThreadRawOnPort(t *testing.T) {
+	h, c := newChat(t, nil)
+
+	form := `{
+	  "type": "object",
+	  "properties": {
+	    "token": {"type": "string", "title": "API Key", "writeOnly": true},
+	    "note":  {"type": "string", "title": "Note"},
+	    "save":  {"type": "boolean", "title": "Save", "format": "button"}
+	  }
+	}`
+	if r := h.Handle(context.Background(), AskPort, AskRequest{Form: form}); r.Err() != nil {
+		t.Fatalf("ask failed: %v", r.Err())
+	}
+
+	answerHead(t, h, c, map[string]interface{}{
+		"token": "sk-live-abc123", "note": "prod key", "save": true,
+	})
+
+	// The flow gets the raw value — the validation flow consumes it.
+	ans := waitOutputs(t, h, AnswerPort, 1)[0].(Answer)
+	if ans.Values["token"] != "sk-live-abc123" {
+		t.Fatalf("Answer port must carry the raw secret, got %+v", ans.Values)
+	}
+
+	// The persisted thread never sees it.
+	var found bool
+	for _, e := range thread(c) {
+		if e.Kind != kindAnswer {
+			continue
+		}
+		found = true
+		if e.Values["token"] != secretMask {
+			t.Fatalf("secret leaked into thread: %+v", e.Values)
+		}
+		if e.Values["note"] != "prod key" || e.Values["save"] != true {
+			t.Fatalf("non-secret fields must survive unmasked: %+v", e.Values)
+		}
+	}
+	if !found {
+		t.Fatal("no answer entry in thread")
+	}
+
+	// And therefore the widget data never sees it either.
+	raw, err := json.Marshal(c.control())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "sk-live-abc123") {
+		t.Fatal("secret leaked into widget control data")
+	}
+}
+
+func TestSecretMaskCoversPasswordFormat(t *testing.T) {
+	h, c := newChat(t, nil)
+	form := `{"type":"object","properties":{
+	  "key":  {"type":"string","format":"password"},
+	  "save": {"type":"boolean","format":"button"}}}`
+	if r := h.Handle(context.Background(), AskPort, AskRequest{Form: form}); r.Err() != nil {
+		t.Fatalf("ask failed: %v", r.Err())
+	}
+	answerHead(t, h, c, map[string]interface{}{"key": "hunter2", "save": true})
+	waitOutputs(t, h, AnswerPort, 1)
+	for _, e := range thread(c) {
+		if e.Kind == kindAnswer && e.Values["key"] != secretMask {
+			t.Fatalf("password-format field leaked: %+v", e.Values)
+		}
 	}
 }
