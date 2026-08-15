@@ -84,7 +84,7 @@ every append; State backing is CR status — must stay small.
 
 ## Migration
 
-- `prompt` and `ask` stay, marked deprecated in Info; no flows break.
+- `prompt` and `ask` are DELETED (owner call: lived under a week, nobody used them).
 - prompt-demo `chat` flow moves to the new component as the acceptance case:
   browser test = send message → working → answer bubble; wire an ask into the same
   thread → question card → approve → downstream fires.
