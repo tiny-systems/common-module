@@ -2,6 +2,7 @@ package form
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/tiny-systems/module/api/v1alpha1"
@@ -31,6 +32,11 @@ const (
 	// pod restart — a display panel that forgets "key saved ✓" on every
 	// deploy reads as broken.
 	stateKeyResult = "result"
+
+	// stateKeyPrefill persists values the flow wrote back into the fields.
+	// A masked saved secret ("••••NgAA") sitting IN the password field says
+	// "a key is set" the way a sentence never will.
+	stateKeyPrefill = "prefill"
 )
 
 type Context any
@@ -49,7 +55,8 @@ type Control struct {
 
 // ResultMessage is what the flow writes back after handling a submission.
 type ResultMessage struct {
-	Text string `json:"text" required:"true" title:"Text" description:"Outcome shown inside the form widget, under the button. Markdown is rendered."`
+	Text    string  `json:"text" required:"true" title:"Text" description:"Outcome shown inside the form widget, under the button. Markdown is rendered."`
+	Prefill Context `json:"prefill,omitempty" title:"Prefill" description:"Optional values written back into the form's fields (e.g. the masked saved secret into a password field). Persisted; shown until the person edits or the flow overwrites."`
 }
 
 type Component struct {
@@ -123,6 +130,15 @@ func (t *Component) Handle(ctx context.Context, _ module.Handler, port string, m
 		if err := st.Set(ctx, stateKeyResult, []byte(in.Text)); err != nil {
 			return module.Fail(fmt.Errorf("persist result: %w", err))
 		}
+		if in.Prefill != nil {
+			raw, err := json.Marshal(in.Prefill)
+			if err != nil {
+				return module.Fail(fmt.Errorf("marshal prefill: %w", err))
+			}
+			if err := st.Set(ctx, stateKeyPrefill, raw); err != nil {
+				return module.Fail(fmt.Errorf("persist prefill: %w", err))
+			}
+		}
 	}
 	t.Emit(ctx, v1alpha1.ControlPort, t.control(ctx))
 	return module.Result{}
@@ -140,9 +156,31 @@ func (t *Component) loadResult(ctx context.Context) string {
 	return string(raw)
 }
 
+func (t *Component) loadPrefill(ctx context.Context) Context {
+	st := t.State()
+	if st == nil {
+		return nil
+	}
+	raw, found, err := st.Get(ctx, stateKeyPrefill)
+	if err != nil || !found {
+		return nil
+	}
+	var prefill Context
+	if err := json.Unmarshal(raw, &prefill); err != nil {
+		return nil
+	}
+	return prefill
+}
+
 func (t *Component) control(ctx context.Context) Control {
+	// What the flow wrote back wins over the authored blank form: the person
+	// should see the state of the world, not the empty template.
+	formCtx := t.settings.Context
+	if prefill := t.loadPrefill(ctx); prefill != nil {
+		formCtx = prefill
+	}
 	return Control{
-		Context: t.settings.Context,
+		Context: formCtx,
 		Result:  t.loadResult(ctx),
 	}
 }

@@ -106,3 +106,26 @@ func TestResultPersistsAndPublishes(t *testing.T) {
 		t.Fatal("expected a control publish after Result")
 	}
 }
+
+// Prefill puts the flow's values back INTO the fields — the masked saved
+// secret shows as a filled password field, not as a sentence about one.
+func TestResultPrefillFillsForm(t *testing.T) {
+	h, c := newForm(t, &Settings{Context: map[string]any{"apiKey": ""}})
+
+	msg := ResultMessage{Text: "saved ••••1234 ✓", Prefill: map[string]any{"apiKey": "••••1234"}}
+	if r := h.Handle(context.Background(), ResultPort, msg); r.Err() != nil {
+		t.Fatalf("result failed: %v", r.Err())
+	}
+
+	ctrl := c.control(context.Background())
+	got, ok := ctrl.Context.(map[string]any)
+	if !ok {
+		t.Fatalf("control context is %T, want map", ctrl.Context)
+	}
+	if got["apiKey"] != "••••1234" {
+		t.Fatalf("control context = %v, want the prefilled masked secret", got)
+	}
+	if ctrl.Result != "saved ••••1234 ✓" {
+		t.Fatalf("control result = %q, want the flow's text", ctrl.Result)
+	}
+}
