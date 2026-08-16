@@ -15,6 +15,7 @@ import (
 	_ "github.com/tiny-systems/common-module/components/debug"
 	_ "github.com/tiny-systems/common-module/components/delay"
 	_ "github.com/tiny-systems/common-module/components/display"
+	_ "github.com/tiny-systems/common-module/components/form"
 	_ "github.com/tiny-systems/common-module/components/flowtelemetry"
 	_ "github.com/tiny-systems/common-module/components/groupby"
 	_ "github.com/tiny-systems/common-module/components/inject"
