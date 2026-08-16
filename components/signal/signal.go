@@ -33,7 +33,11 @@ type Component struct {
 // (see [[distributed-control-plane]]). To stop something a Signal started, wire
 // a Stop-capable component downstream (e.g. http_server's Stop port).
 type Control struct {
-	Context Context `json:"context" required:"true" title:"Context"`
+	// configurable so a custom Context schema authored on the node (e.g. a
+	// masked API-key field on a settings form) overlays the widget — without
+	// it UpdateWithDefinitions skips the def and the trigger form renders
+	// value-derived plain-text fields, losing title/format/writeOnly.
+	Context Context `json:"context" required:"true" configurable:"true" title:"Context"`
 	Send    bool    `json:"send" format:"button" title:"Send" required:"true"`
 }
 
