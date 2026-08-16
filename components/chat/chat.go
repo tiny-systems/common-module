@@ -119,6 +119,8 @@ type Settings struct {
 	HistoryLimit int `json:"historyLimit" title:"History Limit" default:"50" description:"Messages kept in the widget thread. Display only — conversation memory belongs in a store component."`
 
 	Placeholder string `json:"placeholder,omitempty" title:"Composer Placeholder" description:"Hint text in the input box, e.g. 'Ask the agent…'."`
+
+	HideComposer bool `json:"hideComposer" title:"Hide Composer" description:"Form mode: the widget shows only question cards and notes — no free-text input. For settings-style surfaces where the flow drives every question (keep the card armed by re-asking after each answer)."`
 }
 
 // threadEntry is one bubble of the display buffer.
@@ -725,6 +727,9 @@ func (c *Component) control() map[string]interface{} {
 	out := map[string]interface{}{
 		"thread":      t,
 		"placeholder": c.placeholder(),
+	}
+	if c.settings.HideComposer {
+		out["hideComposer"] = true
 	}
 	if pending != nil {
 		out["pendingQuestion"] = pending
