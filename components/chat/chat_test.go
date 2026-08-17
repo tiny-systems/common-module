@@ -260,6 +260,67 @@ func TestQuestionExpiry(t *testing.T) {
 	}
 }
 
+// ---- clear (flow wipes the surface) ----------------------------------------
+
+func TestClearEmptiesThreadAndRepublishes(t *testing.T) {
+	h, c := newChat(t, nil)
+	h.Handle(leaderCtx(), v1alpha1.ControlPort, map[string]interface{}{
+		kindField: kindMessage, textField: "remember this",
+	})
+	waitOutputs(t, h, MessagePort, 1)
+	if len(thread(c)) != 1 {
+		t.Fatalf("seed failed: %+v", thread(c))
+	}
+	before := len(h.PortOutputs(v1alpha1.ControlPort))
+
+	if r := h.Handle(context.Background(), ClearPort, ClearRequest{Context: "wipe"}); r.Err() != nil {
+		t.Fatalf("clear failed: %v", r.Err())
+	}
+
+	if th := thread(c); len(th) != 0 {
+		t.Fatalf("thread survived clear: %+v", th)
+	}
+	if outs := waitOutputs(t, h, v1alpha1.ControlPort, before+1); len(outs) <= before {
+		t.Fatal("clear did not republish the widget")
+	}
+}
+
+func TestClearDropsPendingQuestion(t *testing.T) {
+	h, c := newChat(t, nil)
+	askQ(t, h, "under-review")
+	if c.control()["pendingQuestion"] == nil {
+		t.Fatal("seed failed: no pending question")
+	}
+
+	if r := h.Handle(context.Background(), ClearPort, ClearRequest{}); r.Err() != nil {
+		t.Fatalf("clear failed: %v", r.Err())
+	}
+
+	if p := c.control()["pendingQuestion"]; p != nil {
+		t.Fatalf("queue survived clear: %+v", p)
+	}
+	if q := c.loadQueue(context.Background()); len(q) != 0 {
+		t.Fatalf("queue survived clear: %+v", q)
+	}
+	if th := thread(c); len(th) != 0 {
+		t.Fatalf("thread survived clear: %+v", th)
+	}
+}
+
+func TestClearOnEmptyChatIsNoOp(t *testing.T) {
+	h, c := newChat(t, nil)
+	if r := h.Handle(context.Background(), ClearPort, ClearRequest{}); r.Err() != nil {
+		t.Fatalf("clear on empty chat failed: %v", r.Err())
+	}
+	// Idempotent: a second wipe is just as uneventful.
+	if r := h.Handle(context.Background(), ClearPort, ClearRequest{}); r.Err() != nil {
+		t.Fatalf("second clear failed: %v", r.Err())
+	}
+	if th := thread(c); len(th) != 0 {
+		t.Fatalf("clear invented thread entries: %+v", th)
+	}
+}
+
 // ---- history cap -----------------------------------------------------------
 
 func TestHistoryLimitCapsThread(t *testing.T) {

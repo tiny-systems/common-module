@@ -42,6 +42,7 @@ const (
 
 	SayPort     = "say"
 	AskPort     = "ask"
+	ClearPort   = "clear"
 	MessagePort = "message"
 	AnswerPort  = "answer"
 	ErrorPort   = "error"
@@ -87,6 +88,12 @@ type Say struct {
 type AskRequest struct {
 	Context Context `json:"context,omitempty" configurable:"true" title:"Context" description:"Payload under review — shown on the question card and passed through to the answer."`
 	Form    string  `json:"form,omitempty" title:"Form" format:"code" language:"json" description:"JSON Schema of the question form, overriding the Settings form for this question only. Fields with format:\"button\" are the answers."`
+}
+
+// ClearRequest starts the conversation over: the arrival is the whole
+// instruction, so the payload carries nothing but passthrough context.
+type ClearRequest struct {
+	Context Context `json:"context,omitempty" configurable:"true" title:"Context" description:"Passthrough payload, carried for correlation only — anything arriving here wipes the displayed conversation and any pending questions. Conversation MEMORY lives in a store component and must be cleared there separately."`
 }
 
 // Message is a human's free composer input.
@@ -179,6 +186,7 @@ func (c *Component) GetInfo() module.ComponentInfo {
 			"The flow speaks → Say port (markdown bubble; role system/error renders as a note). " +
 			"The flow asks → Ask port: a question card with the form's buttons appears in the thread and the submission emits on Answer as {questionId, values, context} — wire Answer to the gated action. " +
 			"Questions queue FIFO, persist across restarts, and expire onto Error after timeoutSeconds. " +
+			"The flow starts over → Clear port: the thread and any pending questions are wiped (store memory clears separately). " +
 			"The thread is display only (historyLimit); keep real conversation memory in a store component. " +
 			"Replaces prompt and ask.",
 		Tags: []string{"SDK", "dashboard", "Human"},
@@ -360,7 +368,7 @@ func expiredNotes(expired []ErrorMessage, now time.Time) []threadEntry {
 
 // ---- flow-facing handlers --------------------------------------------------
 
-// Handle receives Say and Ask. NOT leader-gated: flow traffic is routed to
+// Handle receives Say, Ask and Clear. NOT leader-gated: flow traffic is routed to
 // whichever replica the runtime picks, and State converges through the shared
 // backend. (Leader-gating an answer path silently dropped every answer once —
 // see prompt's history. OnControl and OnReconcile DO gate.)
@@ -378,6 +386,11 @@ func (c *Component) Handle(ctx context.Context, _ module.Handler, port string, m
 			return module.Fail(fmt.Errorf("invalid message on Ask"))
 		}
 		return c.handleAsk(ctx, in)
+	case ClearPort:
+		if _, ok := msg.(ClearRequest); !ok {
+			return module.Fail(fmt.Errorf("invalid message on Clear"))
+		}
+		return c.handleClear(ctx)
 	default:
 		return module.Fail(fmt.Errorf("port %s is not supported", port))
 	}
@@ -454,6 +467,30 @@ func (c *Component) handleAsk(ctx context.Context, in AskRequest) module.Result 
 	c.stateMu.Unlock()
 
 	c.emitExpired(ctx, expired, errPort)
+	return c.Emit(ctx, v1alpha1.ControlPort, c.control())
+}
+
+// handleClear empties the display buffer and drops every unanswered question.
+// Outstanding questions are dropped, not expired: the conversation they belonged
+// to no longer exists, so there is nothing for an Error emission to correlate
+// with. Deleting both keys is idempotent, so clearing an empty chat is a no-op
+// that still republishes — the widget may be showing a stale render.
+func (c *Component) handleClear(ctx context.Context) module.Result {
+	if c.State() == nil {
+		return module.Fail(fmt.Errorf("state backend not available"))
+	}
+
+	c.stateMu.Lock()
+	if err := c.saveThread(ctx, nil); err != nil {
+		c.stateMu.Unlock()
+		return module.Fail(err)
+	}
+	if err := c.saveQueue(ctx, nil); err != nil {
+		c.stateMu.Unlock()
+		return module.Fail(err)
+	}
+	c.stateMu.Unlock()
+
 	return c.Emit(ctx, v1alpha1.ControlPort, c.control())
 }
 
@@ -804,6 +841,12 @@ func (c *Component) Ports() []module.Port {
 			Label:         "Ask",
 			Position:      module.Left,
 			Configuration: AskRequest{},
+		},
+		{
+			Name:          ClearPort,
+			Label:         "Clear",
+			Position:      module.Left,
+			Configuration: ClearRequest{},
 		},
 		{
 			Name:          MessagePort,
