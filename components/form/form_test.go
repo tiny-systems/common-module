@@ -129,3 +129,25 @@ func TestResultPrefillFillsForm(t *testing.T) {
 		t.Fatalf("control result = %q, want the flow's text", ctrl.Result)
 	}
 }
+
+// A result belongs to the submission that produced it: leaving the previous
+// one on screen while a new submission runs reads as if this one already
+// succeeded.
+func TestSubmitClearsPreviousResult(t *testing.T) {
+	h, c := newForm(t, &Settings{Context: map[string]any{"apiKey": ""}})
+
+	if r := h.Handle(context.Background(), ResultPort, ResultMessage{Text: "saved ••••1234 ✓"}); r.Err() != nil {
+		t.Fatalf("result failed: %v", r.Err())
+	}
+	if got := c.control(context.Background()).Result; got == "" {
+		t.Fatal("precondition: expected a stored result")
+	}
+
+	if r := h.Handle(leaderCtx(), v1alpha1.ControlPort, Control{Context: map[string]any{"apiKey": "sk-new"}, Submit: true}); r.Err() != nil {
+		t.Fatalf("control failed: %v", r.Err())
+	}
+	if got := c.control(context.Background()).Result; got != "" {
+		t.Fatalf("control result = %q, want it cleared while the new submission runs", got)
+	}
+	waitOutputs(t, h, OutPort, 1)
+}

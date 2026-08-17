@@ -110,6 +110,18 @@ func (t *Component) OnControl(ctx context.Context, msg any) error {
 		sendCtx = t.settings.Context
 	}
 
+	// A result describes the submission that produced it. Leaving the last
+	// one on screen while a new submission runs reads as if THIS one already
+	// succeeded — a form that says "History deleted" over a submission that
+	// deleted nothing. Clear it and republish; the flow's answer fills it in
+	// again.
+	if st := t.State(); st != nil {
+		if err := st.Delete(ctx, stateKeyResult); err != nil {
+			log.Warn().Err(err).Msg("form component: could not clear the previous result")
+		}
+		t.Emit(ctx, v1alpha1.ControlPort, t.control(ctx))
+	}
+
 	log.Info().Msg("form component: submit — emitting on Out")
 	go t.Emit(context.Background(), OutPort, sendCtx)
 	return nil
