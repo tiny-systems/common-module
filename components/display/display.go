@@ -12,6 +12,14 @@ import (
 const (
 	ComponentName        = "display"
 	InPort        string = "in"
+
+	// stateKeyText persists what was last shown. Kept in module.State
+	// (node status metadata) rather than a field, because a field lives
+	// only as long as the pod: a restart, a redeploy or a reschedule
+	// blanked every panel on the dashboard. A flow-fed panel recovered on
+	// its next run, but one written once — a readme, a summary from a
+	// slow schedule — was gone for good.
+	stateKeyText = "text"
 )
 
 // Settings holds nothing the user configures: what a display shows is
@@ -39,7 +47,6 @@ type Control struct {
 type Component struct {
 	module.Base
 	settings Settings
-	text     string
 }
 
 func (t *Component) GetInfo() module.ComponentInfo {
@@ -79,9 +86,26 @@ func (t *Component) Handle(ctx context.Context, _ module.Handler, port string, m
 	// display's field is called "text" — so a flow that pipes a secret in
 	// here is the thing to fix, not this component. Publishing redacts
 	// credential-shaped fields on the way out.
-	t.text = in.Text
+	if st := t.State(); st != nil {
+		if err := st.Set(ctx, stateKeyText, []byte(in.Text)); err != nil {
+			return module.Fail(fmt.Errorf("persist text: %w", err))
+		}
+	}
 	t.Emit(ctx, v1alpha1.ReconcilePort, nil)
 	return module.Result{}
+}
+
+// text returns what was last shown, surviving the pod that showed it.
+func (t *Component) text(ctx context.Context) string {
+	st := t.State()
+	if st == nil {
+		return ""
+	}
+	raw, found, err := st.Get(ctx, stateKeyText)
+	if err != nil || !found {
+		return ""
+	}
+	return string(raw)
 }
 
 func (t *Component) Ports() []module.Port {
@@ -97,7 +121,7 @@ func (t *Component) Ports() []module.Port {
 			Label:  "Control",
 			Source: true,
 			Configuration: Control{
-				Text: t.text,
+				Text: t.text(context.Background()),
 			},
 		},
 		{
