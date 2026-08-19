@@ -126,7 +126,7 @@ func (c *Component) GetInfo() module.ComponentInfo {
 	return module.ComponentInfo{
 		Name:        ComponentName,
 		Description: "Key-Value Store",
-		Info:        "Key-value store backed by TinyNode metadata via the SDK State primitive. Stores documents with a configurable schema and primary key. Supports JSONPath queries. Multi-replica safe — all common-module replicas observe the same store via the K8s watch.",
+		Info:        "Key-value store backed by TinyNode metadata via the SDK State primitive. Stores documents with a configurable schema and primary key. Supports JSONPath queries. Multi-replica safe — all common-module replicas observe the same store via the K8s watch. Document VALUES ARE STRINGS: a count or a flag must be converted before it is stored (an expression can do it, e.g. \"\" + $.count), and comes back as a string to be parsed by whatever reads it.",
 		Tags:        []string{"KV", "Storage", "Data"},
 	}
 }
