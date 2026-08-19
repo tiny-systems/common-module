@@ -22,9 +22,17 @@ const (
 	stateKeyText = "text"
 )
 
-// Settings holds nothing the user configures: what a display shows is
-// whatever arrives, and how it renders is fixed by the component.
-type Settings struct{}
+// Settings carries the panel's authored text — what it shows before any
+// message arrives.
+//
+// This is what makes a written panel part of the flow rather than a fact
+// about one running copy of it. A readme card receives no messages, so
+// without it the text lived only in node state: it never appeared in an
+// export, and anyone installing the solution got a blank card with nothing
+// to ever fill it.
+type Settings struct {
+	Text string `json:"text" format:"markdown" title:"Text" description:"Shown until a message arrives. Use it for a readme or a placeholder — it ships with the flow, unlike text delivered at runtime."`
+}
 
 // InMessage is what to show. A single named field, deliberately: a display
 // panel exists to answer one question, and a flow that wants to surface three
@@ -57,7 +65,10 @@ func (t *Component) GetInfo() module.ComponentInfo {
 			"Use it as a flow's answer panel: wire the value a person actually reads into Text " +
 			"(e.g. text: \"{{$.outputData.messages[0].content}}\") rather than passing the whole message, " +
 			"which renders as a wall of form fields. Has no output ports — it is a sink. " +
-			"Enable it as a dashboard widget to give a flow a readable result.",
+			"Enable it as a dashboard widget to give a flow a readable result. " +
+			"For a panel of written text — a readme describing what the agent does — wire nothing and set " +
+			"settings.text instead: that ships with the flow, whereas text delivered at runtime does not " +
+			"survive an export and leaves a blank card for whoever installs it.",
 		Tags: []string{"SDK", "dashboard"},
 	}
 }
@@ -95,17 +106,19 @@ func (t *Component) Handle(ctx context.Context, _ module.Handler, port string, m
 	return module.Result{}
 }
 
-// text returns what was last shown, surviving the pod that showed it.
+// text returns what to show: the last message if one has ever arrived,
+// otherwise the authored default.
+//
+// Runtime wins over authored, and permanently — a panel that has shown a
+// real answer must not revert to its placeholder when the pod restarts,
+// which is the whole reason the last message is persisted.
 func (t *Component) text(ctx context.Context) string {
-	st := t.State()
-	if st == nil {
-		return ""
+	if st := t.State(); st != nil {
+		if raw, found, err := st.Get(ctx, stateKeyText); err == nil && found {
+			return string(raw)
+		}
 	}
-	raw, found, err := st.Get(ctx, stateKeyText)
-	if err != nil || !found {
-		return ""
-	}
-	return string(raw)
+	return t.settings.Text
 }
 
 func (t *Component) Ports() []module.Port {
