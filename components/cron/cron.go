@@ -131,6 +131,24 @@ func (c *Component) handleControl(msg interface{}) error {
 		if ctrl.Stop {
 			return c.stop()
 		}
+		// A running cron used to ignore everything except Stop. The message
+		// that reaches it while running carries the context but not the Start
+		// flag — the port's schema differs by state — so a caller supplying
+		// fresh settings, typically the credential a user just typed, got
+		// silence: no error, no effect, and the next scheduled run still used
+		// the old context. Apply the change instead, which is what the widget
+		// being "the settings form" is supposed to mean.
+		if !c.contextMatches(ctrl.Context) {
+			if err := c.stop(); err != nil {
+				return err
+			}
+			c.mu.Lock()
+			c.settings.Context = ctrl.Context
+			c.settingsFromPort = true
+			c.mu.Unlock()
+			c.persistRunningState()
+			go c.run(context.Background())
+		}
 	case ControlStopped:
 		// Validate schedule before starting
 		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
@@ -155,6 +173,23 @@ func (c *Component) handleControl(msg interface{}) error {
 		go c.run(context.Background())
 	}
 	return nil
+}
+
+// contextMatches reports whether a delivered context is the one already in
+// force. Compared by encoded form rather than identity: the context is
+// arbitrary user data, and a redelivery of the same values must not restart
+// the schedule.
+func (c *Component) contextMatches(incoming Context) bool {
+	c.mu.Lock()
+	current := c.settings.Context
+	c.mu.Unlock()
+
+	a, errA := json.Marshal(current)
+	b, errB := json.Marshal(incoming)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return string(a) == string(b)
 }
 
 func (c *Component) restoreSettingsFromMetadata(metadata map[string]string) {
