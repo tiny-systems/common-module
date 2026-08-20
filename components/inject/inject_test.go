@@ -59,9 +59,9 @@ func TestPodRestart(t *testing.T) {
 		Data: map[string]any{"ns": "prod", "label": "app=api"},
 	})
 
-	if pod1.Metadata["inject-config"] == "" {
-		t.Fatal("config not persisted to metadata")
-	}
+	// What the config landed under is the State layer's business. What
+	// matters is that a new instance can still find it — the assertion below,
+	// which is the reason any of this is persisted at all.
 
 	// Pod 2: fresh instance with pod1's metadata
 	pod2 := pod1.NewPod()
@@ -144,7 +144,7 @@ func TestConfigUpdate(t *testing.T) {
 	}
 }
 
-func TestMetadataPersistence(t *testing.T) {
+func TestConfigSurvivesTheInstanceThatReceivedIt(t *testing.T) {
 	ctx := context.Background()
 	h := testharness.New((&inject.Component{}).Instance())
 
@@ -152,12 +152,24 @@ func TestMetadataPersistence(t *testing.T) {
 		Data: map[string]any{"key": "value"},
 	})
 
-	raw, ok := h.Metadata["inject-config"]
-	if !ok {
-		t.Fatal("inject-config not in metadata")
+	// The runtime recreates a component instance whenever a node reconciles,
+	// which zeroes every in-memory field. A config that lives only in the
+	// instance is gone at that moment, and the next message goes out with
+	// nothing attached — silently, since nil is a legal config.
+	restarted := h.NewPod()
+	restarted.Reconcile(ctx)
+	restarted.Handle(ctx, "message", inject.Message{Context: "after restart"})
+
+	outs := restarted.PortOutputs("output")
+	if len(outs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(outs))
 	}
-	if raw == "" || raw == "null" {
-		t.Fatalf("metadata value is empty or null: %q", raw)
+	config, ok := outs[0].(inject.Output).Config.(map[string]any)
+	if !ok {
+		t.Fatalf("config came back as %T, want the map that was stored", outs[0].(inject.Output).Config)
+	}
+	if config["key"] != "value" {
+		t.Fatalf("config = %v, want the value the first instance received", config)
 	}
 }
 

@@ -11,12 +11,17 @@ import (
 )
 
 const (
-	ComponentName     = "inject"
-	ConfigPort        = "config"
-	MessagePort       = "message"
-	OutputPort        = "output"
-	ErrorPort         = "error"
-	metadataKeyConfig = "inject-config"
+	ComponentName = "inject"
+	ConfigPort    = "config"
+	MessagePort   = "message"
+	OutputPort    = "output"
+	ErrorPort     = "error"
+	// stateKeyConfig persists the injected config through module.State (backed
+	// by node metadata). Reading it at message time — rather than trusting an
+	// in-memory field — is what lets a message handled after the runtime
+	// recreated the component instance (which zeroes in-memory state) still
+	// carry the stored config instead of nil.
+	stateKeyConfig = "config"
 )
 
 type Context any
@@ -52,9 +57,8 @@ type ErrorOutput struct {
 type Component struct {
 	module.Base
 
-	settings         Settings
-	config           any
-	settingsFromPort bool // set when config port provides data; prevents _reconcile from overwriting with stale metadata
+	settings Settings
+	config   any // in-memory fast path; State is the source of truth after a recreate
 }
 
 func (c *Component) Instance() module.Component {
@@ -80,24 +84,9 @@ func (c *Component) OnSettings(_ context.Context, msg any) error {
 	return nil
 }
 
-// OnReconcile restores stored config from metadata, unless the config port
-// already provided fresh data.
-func (c *Component) OnReconcile(_ context.Context, node v1alpha1.TinyNode) error {
-	if node.Status.Metadata == nil {
-		return nil
-	}
-	configStr, ok := node.Status.Metadata[metadataKeyConfig]
-	if !ok {
-		return nil
-	}
-	if c.settingsFromPort {
-		return nil
-	}
-	var config any
-	if err := json.Unmarshal([]byte(configStr), &config); err != nil {
-		return nil
-	}
-	c.config = config
+// OnReconcile is a no-op: the config is loaded from State at message time, so
+// there is no in-memory field to warm from metadata on reconcile.
+func (c *Component) OnReconcile(_ context.Context, _ v1alpha1.TinyNode) error {
 	return nil
 }
 
@@ -106,21 +95,26 @@ func (c *Component) OnReconcile(_ context.Context, node v1alpha1.TinyNode) error
 func (c *Component) Handle(ctx context.Context, handler module.Handler, port string, msg any) module.Result {
 	switch port {
 	case ConfigPort:
-		return c.handleConfig(msg)
+		return c.handleConfig(ctx, msg)
 	case MessagePort:
 		return c.handleMessage(ctx, handler, msg)
 	}
 	return module.Fail(fmt.Errorf("unknown port: %s", port))
 }
 
-func (c *Component) handleConfig(msg any) module.Result {
+func (c *Component) handleConfig(ctx context.Context, msg any) module.Result {
 	in, ok := msg.(Config)
 	if !ok {
 		return module.Fail(fmt.Errorf("invalid config"))
 	}
 	c.config = in.Data
-	c.settingsFromPort = true
-	c.persistConfig()
+	if st := c.State(); st != nil {
+		if b, err := json.Marshal(in.Data); err == nil {
+			if err := st.Set(ctx, stateKeyConfig, b); err != nil {
+				return module.Fail(err)
+			}
+		}
+	}
 	return module.Result{}
 }
 
@@ -129,7 +123,8 @@ func (c *Component) handleMessage(ctx context.Context, handler module.Handler, m
 	if !ok {
 		return module.Fail(fmt.Errorf("invalid message"))
 	}
-	if c.settings.ConfigRequired && c.config == nil {
+	config := c.loadConfig(ctx)
+	if c.settings.ConfigRequired && config == nil {
 		return handler(ctx, ErrorPort, ErrorOutput{
 			Context: in.Context,
 			Error:   "config not set",
@@ -137,19 +132,31 @@ func (c *Component) handleMessage(ctx context.Context, handler module.Handler, m
 	}
 	return handler(ctx, OutputPort, Output{
 		Context: in.Context,
-		Config:  c.config,
+		Config:  config,
 	})
 }
 
-func (c *Component) persistConfig() {
-	configBytes, _ := json.Marshal(c.config)
-	c.Emit(context.Background(), v1alpha1.ReconcilePort, func(n *v1alpha1.TinyNode) error {
-		if n.Status.Metadata == nil {
-			n.Status.Metadata = make(map[string]string)
-		}
-		n.Status.Metadata[metadataKeyConfig] = string(configBytes)
+// loadConfig returns the in-memory config, falling back to persisted State — so
+// a message handled after the runtime recreated the component instance (which
+// zeroes c.config) still carries the stored config instead of nil.
+func (c *Component) loadConfig(ctx context.Context) any {
+	if c.config != nil {
+		return c.config
+	}
+	st := c.State()
+	if st == nil {
 		return nil
-	})
+	}
+	raw, found, err := st.Get(ctx, stateKeyConfig)
+	if err != nil || !found {
+		return nil
+	}
+	var config any
+	if json.Unmarshal(raw, &config) != nil {
+		return nil
+	}
+	c.config = config
+	return config
 }
 
 func (c *Component) Ports() []module.Port {
